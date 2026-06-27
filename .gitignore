@@ -1,0 +1,26 @@
+# Data / checkpoints / caches
+data/
+datasets/
+checkpoints/
+outputs/
+logs/
+wandb/
+*.h5
+*.hdf5
+*.pt
+*.ckpt
+captions_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

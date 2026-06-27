@@ -1,0 +1,7 @@
+# Ablation: train on LLM-generated captions of the VG graph (content/report-bias axis).
+# Requires running tools/llm_graph_to_caption.py first to populate the captions cache.
+_base_: default_crossattn_talk2dino.yaml
+
+data:
+  text_view: mix                  # mix of llm_caption and serialize
+  captions_cache: data/vg/llm_captions.json

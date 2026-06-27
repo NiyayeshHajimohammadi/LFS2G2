@@ -1,0 +1,7 @@
+# Ablation: pooled-vector conditioning in the shared Talk2DINO space (isolates the bottleneck
+# effect vs. the default patch-token set, holding the encoder space fixed).
+_base_: default_crossattn_talk2dino.yaml
+
+encoders:
+  text_token_mode: pooled
+  image_token_mode: pooled

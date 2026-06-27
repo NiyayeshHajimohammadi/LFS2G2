@@ -1,0 +1,90 @@
+"""Autoregressive graph decoders over the flat 5-tuple vocabulary.
+
+Shared machinery (token/positional embeddings, output head, constrained generation) lives here;
+subclasses only implement ``_hidden(cond, tokens) -> [B, T, d_model]``. Both consume a
+:class:`ConditioningSet`, so pooled vs patch-set conditioning is just ``N==1`` vs ``N>1``.
+"""
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+
+from patchsgg.encoders.base import ConditioningSet
+from patchsgg.decoder.sampling import GenConfig, constrained_generate
+from patchsgg.graph_seq.vocab import GraphVocab
+
+
+class GraphDecoder(nn.Module):
+    def __init__(self, vocab: GraphVocab, cond_dim: int, d_model: int = 512, max_seq_len: int = 512):
+        super().__init__()
+        self.vocab = vocab
+        self.d_model = d_model
+        self.cond_proj = nn.Linear(cond_dim, d_model)
+        self.token_embed = nn.Embedding(vocab.vocab_size, d_model)
+        self.pos_embed = nn.Embedding(max_seq_len, d_model)
+        self.norm = nn.LayerNorm(d_model)
+        self.head = nn.Linear(d_model, vocab.vocab_size)
+        self.max_seq_len = max_seq_len
+
+    # --- subclasses implement this -----------------------------------------------------------
+    def _hidden(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+    def _embed_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
+        pos = torch.arange(tokens.shape[1], device=tokens.device)
+        return self.token_embed(tokens) + self.pos_embed(pos)[None]
+
+    def logits(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:
+        return self.head(self.norm(self._hidden(cond, tokens)))
+
+    def forward(self, cond: ConditioningSet, input_tokens: torch.Tensor) -> torch.Tensor:
+        """Teacher-forced logits ``[B, T, V]`` aligned to the target sequence."""
+        return self.logits(cond, input_tokens)
+
+    @torch.no_grad()
+    def generate(self, cond: ConditioningSet, gen_cfg: GenConfig):
+        B = cond.batch_size
+        start = torch.full((B, 1), self.vocab.start_token, dtype=torch.long, device=cond.tokens.device)
+
+        def step_fn(tokens: torch.Tensor) -> torch.Tensor:
+            return self.logits(cond, tokens)[:, -1]
+
+        return constrained_generate(step_fn, start, self.vocab, gen_cfg)
+
+    @staticmethod
+    def causal_mask(T: int, device) -> torch.Tensor:
+        return torch.triu(torch.full((T, T), float("-inf"), device=device), diagonal=1)
+
+
+def build_decoder(cfg, vocab: GraphVocab, cond_dim: int) -> GraphDecoder:
+    kind = cfg.decoder.type
+    # positional table must cover both teacher-forced training length (max_num_rels) and the
+    # autoregressive generation length (eval.max_rels), whichever is larger.
+    max_rels = max(vocab.max_num_rels, int(cfg.eval.get("max_rels", 100)))
+    common = dict(
+        vocab=vocab,
+        cond_dim=cond_dim,
+        d_model=int(cfg.decoder.d_model),
+        max_seq_len=2 + max_rels * 5,
+    )
+    if kind == "cross_attn":
+        from patchsgg.decoder.cross_attn_decoder import CrossAttnDecoder
+
+        return CrossAttnDecoder(
+            n_layers=int(cfg.decoder.n_layers),
+            n_heads=int(cfg.decoder.n_heads),
+            dim_ff=int(cfg.decoder.dim_ff),
+            dropout=float(cfg.decoder.dropout),
+            **common,
+        )
+    if kind == "prefix":
+        from patchsgg.decoder.prefix_decoder import PrefixDecoder
+
+        return PrefixDecoder(
+            n_layers=int(cfg.decoder.n_layers),
+            n_heads=int(cfg.decoder.n_heads),
+            dim_ff=int(cfg.decoder.dim_ff),
+            dropout=float(cfg.decoder.dropout),
+            **common,
+        )
+    raise ValueError(f"unknown decoder.type {kind!r}")

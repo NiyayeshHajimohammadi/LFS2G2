@@ -1,0 +1,27 @@
+# Core (cross-platform)
+torch>=2.1
+numpy
+omegaconf>=2.3
+pytorch-lightning>=2.1
+h5py
+tqdm
+pyyaml
+einops
+
+# Encoders (installed on the Linux training box)
+ftfy
+regex
+timm
+open_clip_torch
+# OpenAI CLIP from source: pip install git+https://github.com/openai/CLIP.git
+
+# Optional: offline LLM caption generation
+# anthropic
+
+# Build (branched_ssg_matcher Cython/C++20 extension; needs gcc>=11 / clang)
+Cython>=3.0
+
+# Dev
+pytest
+ruff
+scipy   # optional: optimal Hungarian assignment for order_agnostic loss (greedy fallback otherwise)

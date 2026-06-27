@@ -1,0 +1,23 @@
+# Default / headline setup: DINOv2+Talk2DINO shared space, patch-token cross-attention,
+# train on text, evaluate on image, frequency-weighted CE.
+_base_: base.yaml
+
+encoders:
+  space: dinov2_talk2dino
+  text_token_mode: clip_tokens
+  image_token_mode: patch
+
+decoder:
+  type: cross_attn
+
+loss:
+  type: ce_weighted
+
+data:
+  dataset: vg
+  text_view: serialize
+
+train:
+  train_modality: text
+eval:
+  eval_modality: image

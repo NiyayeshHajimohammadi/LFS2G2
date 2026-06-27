@@ -1,0 +1,90 @@
+# Base config. Presets inherit via `_base_: base.yaml` and override only what changes.
+seed: 42
+device: cuda
+output_dir: outputs
+num_workers: 0
+
+vocab:
+  n_preds: 51
+  n_entities: 151
+  max_instance_id: 30
+  random_max_instance_id: 10
+  max_num_rels: 55
+
+encoders:
+  space: dinov2_talk2dino          # toy | clip | dinov2_talk2dino
+  clip_model: ViT-B/16
+  dino_model: dinov2_vitb14
+  dino_embed_dim: 768
+  talk2dino_config: checkpoints/talk2dino/vitb_mlp_infonce.yaml
+  talk2dino_weights: checkpoints/talk2dino/vitb.pth
+  talk2dino_attn_type: qkv
+  text_token_mode: clip_tokens     # pooled | clip_tokens
+  image_token_mode: patch          # pooled | patch
+  max_text_tokens: 32
+  resize_dim: 518
+  # toy-only knobs:
+  dim: 256
+  toy_text_tokens: 1
+  toy_grid: 4
+
+bridge:
+  type: identity                   # identity | capdec_noise | decap_projection
+  types: null                      # optional list to compose multiple bridges
+  noise_std: 0.08
+  projection_temperature: 0.01
+  memory_path: checkpoints/decap_memory.pt   # [M, D] text-embedding bank (build offline)
+  project_tokens: true
+
+decoder:
+  type: cross_attn                 # cross_attn | prefix
+  d_model: 512
+  n_layers: 6
+  n_heads: 8
+  dim_ff: 2048
+  dropout: 0.1
+
+loss:
+  type: ce_weighted                # ce | ce_weighted | matching_ce | order_agnostic
+  label_smoothing: 0.1
+  freq_path: null                  # json {token_id: count} for frequency weighting
+  weighted: true                   # (matching_ce) also apply frequency weights
+  matcher_n: 3
+  matcher_depth: 10
+
+data:
+  dataset: vg                      # vg | toy
+  text_view: serialize             # serialize | llm_caption | mix
+  serialize_with_instances: false
+  captions_cache: null             # json {image_id: [captions]} from llm_graph_to_caption.py
+  vg:
+    roidb_file: data/vg/VG-SGG.h5
+    dict_file: data/vg/VG-SGG-dicts.json
+    image_meta: data/vg/image_data.json
+    image_dir: data/vg/images
+    instance_iou: 0.5
+    num_images: -1
+
+train:
+  train_modality: text
+  batch_size: 16
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  max_epochs: 50
+  eval_every_epochs: 5
+  log_every_steps: 50
+  grad_clip: 1.0
+
+eval:
+  eval_modality: image             # image (real task) | text (diagnostic ceiling)
+  batch_size: 8
+  ks: [20, 50, 100]
+  max_rels: 100
+  temperature: 1.75
+  top_p: 0.95
+  top_k: 0
+  entity_sampling: stochastic
+  allow_end: true
+  matcher_n: 3
+  matcher_depth: 10
+  matcher_identity_fallback: false

@@ -1,0 +1,15 @@
+# Baseline: CLIP joint space, single pooled vector (prefix decoder). The "DeCap-for-graphs"
+# starting point we expect to underperform on dense graphs -- a sanity/comparison point.
+_base_: base.yaml
+
+encoders:
+  space: clip
+  clip_model: ViT-B/16
+  text_token_mode: pooled
+  image_token_mode: pooled
+
+decoder:
+  type: prefix
+
+loss:
+  type: ce_weighted

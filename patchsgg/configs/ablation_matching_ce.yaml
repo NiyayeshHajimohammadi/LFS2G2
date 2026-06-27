@@ -1,0 +1,8 @@
+# Ablation: instance-permutation-invariant matching-CE loss (needs compiled matcher).
+_base_: default_crossattn_talk2dino.yaml
+
+loss:
+  type: matching_ce
+  weighted: true
+  matcher_n: 3
+  matcher_depth: 10

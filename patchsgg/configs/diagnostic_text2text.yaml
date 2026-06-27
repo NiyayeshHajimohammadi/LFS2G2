@@ -1,0 +1,46 @@
+# Diagnostic: train on text, evaluate on text, toy data, no external weights. Measures the
+# decoder/linearization/loss ceiling (information bottleneck) in isolation from the modality gap.
+# Should reach high recall if the machinery is correct.
+_base_: base.yaml
+
+device: cpu
+output_dir: outputs/diagnostic
+
+encoders:
+  space: toy
+  dim: 256
+  toy_text_tokens: 1
+  toy_grid: 4
+
+decoder:
+  type: cross_attn
+  d_model: 128
+  n_layers: 2
+  n_heads: 4
+  dim_ff: 256
+
+loss:
+  type: ce
+
+data:
+  dataset: toy
+  text_view: serialize
+  toy_n_train: 64
+  toy_n_val: 16
+  toy_max_rels: 3
+
+train:
+  train_modality: text
+  batch_size: 16
+  lr: 3.0e-4
+  max_epochs: 30
+  eval_every_epochs: 10
+  log_every_steps: 20
+
+eval:
+  eval_modality: text
+  batch_size: 16
+  ks: [20, 50, 100]
+  max_rels: 8
+  entity_sampling: greedy
+  matcher_identity_fallback: true

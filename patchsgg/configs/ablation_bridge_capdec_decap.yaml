@@ -1,0 +1,9 @@
+# Ablation: modality-gap handling = CapDec noise (train) + DeCap support-memory projection (infer).
+_base_: default_crossattn_talk2dino.yaml
+
+bridge:
+  types: [capdec_noise, decap_projection]
+  noise_std: 0.08
+  projection_temperature: 0.01
+  memory_path: checkpoints/decap_memory.pt
+  project_tokens: true

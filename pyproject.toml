@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "Cython>=3.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patchsgg"
+version = "0.0.1"
+description = "Location-Free Zero-Shot Scene Graph Generation (Patch-ioner x LF-SGG)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Fardin Ayar" }]
+dependencies = [
+    "torch>=2.1",
+    "numpy",
+    "omegaconf>=2.3",
+    "pytorch-lightning>=2.1",
+    "h5py",
+    "tqdm",
+    "pyyaml",
+    "einops",
+]
+
+[project.optional-dependencies]
+# Heavy / environment-specific deps for the real encoders (Linux training box).
+encoders = [
+    "ftfy",
+    "regex",
+    "timm",
+    "open_clip_torch",
+]
+llm = ["anthropic"]
+dev = ["pytest", "ruff", "scipy"]
+
+[project.scripts]
+patchsgg-train = "patchsgg.train:main"
+patchsgg-infer = "patchsgg.infer:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["patchsgg*"]
+
+[tool.setuptools.package-data]
+"patchsgg.eval.branched" = ["*.pyx", "*.pxd", "*.h"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
