@@ -34,9 +34,10 @@ def _clip_token_hidden_states(clip_model, tokens: torch.Tensor) -> torch.Tensor:
 
     Mirrors ``CLIP.encode_text`` up to (but not including) the EOS pooling + projection.
     """
+    #MY comment: manually extracts per-token CLIP text hidden states.
     x = clip_model.token_embedding(tokens).type(clip_model.dtype)
     x = x + clip_model.positional_embedding.type(clip_model.dtype)
-    x = x.permute(1, 0, 2)
+    x = x.permute(1, 0, 2)#My comment: ->[L, B, D]
     x = clip_model.transformer(x)
     x = x.permute(1, 0, 2)
     x = clip_model.ln_final(x).type(clip_model.dtype)
@@ -113,3 +114,14 @@ class Talk2DinoTextEncoder(_BaseTextEncoder):
         proj_tokens = self.proj.project_clip_txt(hidden.reshape(B * L, D)).reshape(B, L, -1)
         mask = (tokens != 0)[:, :L]
         return ConditioningSet(tokens=proj_tokens.float(), pooled=pooled, mask=mask)
+#My comment:
+# max_tokens is unused
+# unknown text_token_mode silently becomes token mode
+# per-token CLIP projection is an approximation
+# per-token CLIP projection is an approximation
+# Talk2DINO per-token projection is a stronger approximation
+# no output normalization after Talk2DINO projection
+# checkpoint format assumption
+# duplicate checkpoint loading possibility
+# mask includes special tokens
+# preprocessing/training text format becomes very important

@@ -23,6 +23,8 @@ class DinoV2ImageEncoder(nn.Module):
         self.cfg = cfg
         self.device = cfg.device
         self.token_mode = cfg.encoders.image_token_mode
+        # My comment: "patch" → full spatial grid
+        # My comment: "pooled" → CLS-only bottleneck
         self.model_name = cfg.encoders.dino_model  # e.g. 'dinov2_vitb14' / 'dinov2_vitl14_reg'
         self.model = torch.hub.load("facebookresearch/dinov2", self.model_name)
         self.model.eval().to(self.device)
@@ -63,13 +65,13 @@ class ClipImageEncoder(nn.Module):
         """Patch tokens from CLIP ViT (projected to the joint space) + pooled image embedding."""
         images = images.to(self.device)
         pooled = self.model.encode_image(images).float()
-        pooled = pooled / pooled.norm(dim=-1, keepdim=True)
+        pooled = pooled / pooled.norm(dim=-1, keepdim=True)#My comment: L2 normalization
         if self.token_mode == "pooled":
             return ConditioningSet(tokens=pooled.unsqueeze(1), pooled=pooled)
         v = self.model.visual
-        x = v.conv1(images.type(self.model.dtype))
+        x = v.conv1(images.type(self.model.dtype))#My comment: Transforms image into patch grid.
         x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)  # [B, grid^2, width]
-        cls = v.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device)
+        cls = v.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device)#My comment:a learnable global token.
         x = torch.cat([cls, x], dim=1) + v.positional_embedding.to(x.dtype)
         x = v.ln_pre(x).permute(1, 0, 2)
         x = v.transformer(x).permute(1, 0, 2)
@@ -78,3 +80,10 @@ class ClipImageEncoder(nn.Module):
         if v.proj is not None:
             patches = patches @ v.proj.float()         # -> joint dim
         return ConditioningSet(tokens=patches, pooled=pooled)
+
+#My comment:
+# Manual CLIP internals (HIGH RISK)
+# No guaranteed alignment check between encoders (MEDIUM)
+# Token space mismatch risk (MEDIUM)
+# Preprocessing pipeline inconsistency (MEDIUM)
+# No positional regularization alignment across models (LOW-MEDIUM)

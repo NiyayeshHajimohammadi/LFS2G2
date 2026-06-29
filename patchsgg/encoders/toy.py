@@ -4,6 +4,7 @@ ToyTextEncoder maps each distinct text deterministically to a fixed vector (so d
 distinct, separable conditioning -> the text->text diagnostic can actually overfit). ToyImageEncoder
 turns an image into a small grid of patch tokens via a fixed random conv. Both are frozen.
 """
+#My comment: If the rest of my pipeline is correct, can it learn at all?
 from __future__ import annotations
 
 import hashlib
@@ -32,7 +33,7 @@ class ToyTextEncoder(nn.Module):
 
     @torch.no_grad()
     def encode(self, texts) -> ConditioningSet:
-        vecs = torch.stack([_text_to_vec(t, self.embed_dim) for t in texts]).to(self.device)
+        vecs = torch.stack([_text_to_vec(t, self.embed_dim) for t in texts]).to(self.device)#My comment: shape [B,D]
         tokens = vecs.unsqueeze(1).repeat(1, self.n_tokens, 1)
         return ConditioningSet(tokens=tokens, pooled=vecs)
 
@@ -53,8 +54,12 @@ class ToyImageEncoder(nn.Module):
     @torch.no_grad()
     def encode(self, images: torch.Tensor) -> ConditioningSet:
         images = images.to(self.device)
-        x = self.pool(self.proj(images))                 # [B, D, g, g]
+        x = self.pool(self.proj(images))                 # [B, D, g, g] My comment-> [8,512,4,4]
         B, D, g, _ = x.shape
         tokens = x.reshape(B, D, g * g).permute(0, 2, 1)  # [B, N, D]
-        pooled = tokens.mean(dim=1)
+        pooled = tokens.mean(dim=1) #My commet: Averages all patch embeddings.
         return ConditioningSet(tokens=tokens, pooled=pooled)
+#My comment:  What this module does, is detectine issues with the following factors:
+# The decoder is capable of memorization
+# Training loop is correct
+# Tensor flow is correct

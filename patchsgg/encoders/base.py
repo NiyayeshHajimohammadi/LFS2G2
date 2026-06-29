@@ -21,7 +21,7 @@ class ConditioningSet:
     pooled: ``[B, D]`` global feature (CLS / EOS / mean).
     mask:   ``[B, N]`` boolean, True = valid token (for variable-length text). None => all valid.
     """
-
+    #My comment: stores the outputs of an encoder in a standardized format.
     tokens: torch.Tensor
     pooled: torch.Tensor
     mask: Optional[torch.Tensor] = None
@@ -43,11 +43,13 @@ class ConditioningSet:
 
     def as_pooled(self) -> "ConditioningSet":
         """Collapse to a single conditioning token (the pooled baseline)."""
-        return ConditioningSet(tokens=self.pooled.unsqueeze(1), pooled=self.pooled, mask=None)
+        return ConditioningSet(tokens=self.pooled.unsqueeze(1), pooled=self.pooled, mask=None) #My comment: Treat this embedding as a sequence containing exactly one token.
+        #My comment: Masks are needed when different samples have different numbers of tokens.
 
 
 class Encoder(Protocol):
     """Frozen encoder producing a :class:`ConditioningSet`. ``modality`` is 'text' or 'image'."""
+    #My comment: Anything implementing these members is considered an Encoder
 
     modality: str
     embed_dim: int
@@ -62,6 +64,7 @@ def build_encoders(cfg) -> tuple["Encoder", "Encoder"]:
     Imports are local so a missing heavy dependency (DINOv2/CLIP/Talk2DINO) only breaks the path
     that actually needs it, not the whole package.
     """
+    #My comment: factory function:)))
     space = cfg.encoders.space
     if space == "toy":
         from patchsgg.encoders.toy import ToyImageEncoder, ToyTextEncoder

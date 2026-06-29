@@ -144,3 +144,11 @@ class GraphVocab:
 
 # Module-level default used throughout the codebase / tests.
 VG_VOCAB = GraphVocab()
+
+# Problems:
+# No input validation. Methods like entity_token(), predicate_token(), and instance_token() accept any integer. Passing -1 or an out-of-range value silently produces an invalid token. Adding assertions or raising ValueError would make debugging easier.
+# Magic offsets (+8, +10, +11, +12). They correctly reproduce LF-SGG, but the rationale isn't encoded in the code itself. A named constant or a short explanation of the reserved gaps would improve maintainability.
+# Fixed max_instance_id. This inherited design limits the number of distinguishable same-class instances. It's acceptable for compatibility but should be explicitly discussed as a limitation in the project or paper.
+# SPECIAL is defined but not handled by range_for_role(). This is intentional because special tokens are not a contiguous prediction range during structured decoding, but a short comment in the method would prevent confusion for future contributors.
+
+#My comment: this component answers to the quesion "What does each integer token mean?"

@@ -34,6 +34,7 @@ MatcherTuple = Tuple[int, int, int, int, int]
 # --------------------------------------------------------------------------------------------
 def relation_to_tokens(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> List[int]:
     """5 token ids in *sequence* order: sub_cls, sub_inst, obj_cls, obj_inst, predicate."""
+    #My comment: This function converts one semantic relationship into five integer tokens.
     return [
         vocab.entity_token(rel.subj_cls),
         vocab.instance_token(rel.subj_inst),
@@ -45,6 +46,7 @@ def relation_to_tokens(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> List[int]
 
 def tokens_to_relation(tok: Sequence[int], vocab: GraphVocab = VG_VOCAB) -> Relation:
     """Inverse of :func:`relation_to_tokens` for one 5-token block (sequence order)."""
+    #My comment: converts those token IDs back into a meaningful semantic relation.
     sub_cls, sub_inst, obj_cls, obj_inst, pred = tok
     return Relation(
         subj_cls=vocab.entity_idx(int(sub_cls)),
@@ -57,6 +59,7 @@ def tokens_to_relation(tok: Sequence[int], vocab: GraphVocab = VG_VOCAB) -> Rela
 
 def canonical_tuple(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> MatcherTuple:
     """LF-SGG matcher/metrics tuple (entities in token space, preds/instances 0-based)."""
+    #My comment: This function performs that reordering without changing the semantic meaning.
     return (
         vocab.entity_token(rel.subj_cls),
         rel.subj_inst,
@@ -67,7 +70,7 @@ def canonical_tuple(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> MatcherTuple
 
 
 def graph_to_matcher_tuples(graph: Graph, vocab: GraphVocab = VG_VOCAB) -> List[MatcherTuple]:
-    return [canonical_tuple(r, vocab) for r in graph]
+    return [canonical_tuple(r, vocab) for r in graph] #My comment: list comprehension.
 
 
 # --------------------------------------------------------------------------------------------
@@ -80,6 +83,7 @@ def graph_to_sequence(
     add_end: bool = True,
 ) -> List[int]:
     """Flatten a graph to a token sequence (no padding). Used for eval / quick round-trips."""
+    #My commet: This converts an entire graph into a single autoregressive sequence.
     seq: List[int] = [vocab.start_token] if add_start else []
     for rel in graph[: vocab.max_num_rels]:
         seq.extend(relation_to_tokens(rel, vocab))
@@ -94,6 +98,7 @@ def sequence_to_graph(tokens: Sequence[int], vocab: GraphVocab = VG_VOCAB) -> Gr
     Robust to a leading START token and a trailing END / padding: stops at the first END token
     and ignores a trailing partial (<5 tokens) block.
     """
+    #This converts a single autoregressive sequence into an entire graph.
     toks = list(int(t) for t in tokens)
     if toks and toks[0] == vocab.start_token:
         toks = toks[1:]
@@ -122,6 +127,7 @@ def build_train_pair(
     ``[NO_KNOWN, NO_KNOWN, NO_KNOWN, NOISE, END]`` so that NO_KNOWN positions can be masked out
     of the loss while the model still learns to emit END after the real graph.
     """
+    #My comment: It creates the input and target sequences for teacher forcing.
     rng = rng or np.random.default_rng()
     real = graph[: vocab.max_num_rels]
     n_real = len(real)
@@ -159,3 +165,10 @@ def build_train_pair(
     target_arr = np.asarray(target_seq, dtype=np.int64)
     assert len(input_arr) == len(target_arr), (len(input_arr), len(target_arr))
     return input_arr, target_arr
+
+# Problems: 
+# No range validation when constructing or decoding relations. Invalid indices silently produce invalid tokens.
+# Hard truncation to max_num_rels discards information for dense scenes without warning.
+# Strict 5-token alignment means one decoding error can corrupt the parsing of every subsequent relation.
+# Training depends on correct loss masking for NO_KNOWN. If the loss function later forgets to ignore these tokens, training quality could degrade significantly.
+# Lack of explicit unit tests for round-trip guarantees such as sequence_to_graph(graph_to_sequence(g)) == g, which are critical invariants for this module.
