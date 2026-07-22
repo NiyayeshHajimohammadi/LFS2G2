@@ -4,42 +4,47 @@ Shared machinery (token/positional embeddings, output head, constrained generati
 subclasses only implement ``_hidden(cond, tokens) -> [B, T, d_model]``. Both consume a
 :class:`ConditioningSet`, so pooled vs patch-set conditioning is just ``N==1`` vs ``N>1``.
 """
+#My comment: defines common machinery that both cross_attn_decoder.py and prefix_decoder.py reuse->provides a level of abstraction just needs hidden states
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
-from patchsgg.encoders.base import ConditioningSet
-from patchsgg.decoder.sampling import GenConfig, constrained_generate
-from patchsgg.graph_seq.vocab import GraphVocab
+from patchsgg.encoders.base import ConditioningSet #My comment: The obj that caontains tokens, pooled and mask-> expected shapes: [B,N,D],[B,D],[B,N]
+from patchsgg.decoder.sampling import GenConfig, constrained_generate #My comment: GenConfig stores inference settings
+#My comment: constrained_generate: performs token-by-token generation while enforcing the five-token grammar.
+from patchsgg.graph_seq.vocab import GraphVocab #My comment: GraphVocab defines what every integer token means.
 
 
 class GraphDecoder(nn.Module):
     def __init__(self, vocab: GraphVocab, cond_dim: int, d_model: int = 512, max_seq_len: int = 512):
-        super().__init__()
+        super().__init__() 
         self.vocab = vocab
         self.d_model = d_model
-        self.cond_proj = nn.Linear(cond_dim, d_model)
-        self.token_embed = nn.Embedding(vocab.vocab_size, d_model)
-        self.pos_embed = nn.Embedding(max_seq_len, d_model)
-        self.norm = nn.LayerNorm(d_model)
-        self.head = nn.Linear(d_model, vocab.vocab_size)
+        self.cond_proj = nn.Linear(cond_dim, d_model)#My comment: a learnable linear projection from encoder feature dimension to decoder dimension-> [B, N, cond_dim] → [B, N, d_model]
+        self.token_embed = nn.Embedding(vocab.vocab_size, d_model)#My comment: converts discrete graph token IDs into continuous vectors:[B, T] → [B, T, d_model]
+        self.pos_embed = nn.Embedding(max_seq_len, d_model)#My comment: creates a learnable positional embedding table-> shape pos_embed: [max_seq_len, d_model]
+        self.norm = nn.LayerNorm(d_model)#My comment:  normalizes hidden vectors.
+        self.head = nn.Linear(d_model, vocab.vocab_size)#My comment: maps every hidden vector to one logit per vocabulary token [B, T, d_model] → [B, T, vocab_size]
         self.max_seq_len = max_seq_len
 
     # --- subclasses implement this -----------------------------------------------------------
-    def _hidden(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:
+    def _hidden(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:#My comment: expected output [B, T, d_model]
         raise NotImplementedError
 
-    def _embed_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
+    def _embed_tokens(self, tokens: torch.Tensor) -> torch.Tensor: #My comment: This internal helper combines graph-token and positional embeddings.
+        #My comment: Expected inout: tokens: [B, T], dtype=torch.long/ Expected output: Zero-shotCross-modalTransferForLocation-freeSceneGraphGeneration
         pos = torch.arange(tokens.shape[1], device=tokens.device)
-        return self.token_embed(tokens) + self.pos_embed(pos)[None]
+        return self.token_embed(tokens) + self.pos_embed(pos)[None]#My comment: [B, T, d_model] + [1, T, d_model]
 
     def logits(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:
+        #My comment: takes the decoder’s internal hidden representations and converts them into scores for every token in the graph vocabulary.
         return self.head(self.norm(self._hidden(cond, tokens)))
 
     def forward(self, cond: ConditioningSet, input_tokens: torch.Tensor) -> torch.Tensor:
         """Teacher-forced logits ``[B, T, V]`` aligned to the target sequence."""
         return self.logits(cond, input_tokens)
+        #My comment: teacher-forcing shift itself. That shift is created by build_train_pair() in graph_seq/linearize.py.
 
     @torch.no_grad()
     def generate(self, cond: ConditioningSet, gen_cfg: GenConfig):

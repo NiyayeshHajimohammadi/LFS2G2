@@ -13,13 +13,18 @@ import torch
 import torch.nn as nn
 
 from patchsgg.encoders.base import ConditioningSet
+#My comment: Reminder->ConditioningSet(
+#     tokens=[B, N, D],
+#     pooled=[B, D],
+#     mask=optional [B, N],
+# )
 
 
-def _text_to_vec(text: str, dim: int) -> torch.Tensor:
-    seed = int(hashlib.sha1(text.encode("utf-8")).hexdigest()[:8], 16)
-    g = torch.Generator().manual_seed(seed)
-    v = torch.randn(dim, generator=g)
-    return v / v.norm().clamp_min(1e-6)
+def _text_to_vec(text: str, dim: int) -> torch.Tensor:#My comment: takes the string to encode and the dim returens a tensor shaped [dim]
+    seed = int(hashlib.sha1(text.encode("utf-8")).hexdigest()[:8], 16)#My comment: ncode the string as bytes, Hash the bytes using SHA-1, Convert the hash to hexadecimal,Keep the first eight hexadecimal characters,Convert hexadecimal to an integer
+    g = torch.Generator().manual_seed(seed)#My comment: Creates a dedicated PyTorch random-number generator and seeds it.
+    v = torch.randn(dim, generator=g)#My comment: Samples dim independent values from a standard normal distribution.
+    return v / v.norm().clamp_min(1e-6) #Normalizes the vector to approximately unit length.
 
 
 class ToyTextEncoder(nn.Module):
@@ -27,14 +32,14 @@ class ToyTextEncoder(nn.Module):
 
     def __init__(self, cfg):
         super().__init__()
-        self.embed_dim = int(cfg.encoders.dim)
+        self.embed_dim = int(cfg.encoders.dim) #My comment: shape [B, 256]
         self.n_tokens = int(cfg.encoders.get("toy_text_tokens", 1))
         self.device = cfg.device
 
     @torch.no_grad()
     def encode(self, texts) -> ConditioningSet:
         vecs = torch.stack([_text_to_vec(t, self.embed_dim) for t in texts]).to(self.device)#My comment: shape [B,D]
-        tokens = vecs.unsqueeze(1).repeat(1, self.n_tokens, 1)
+        tokens = vecs.unsqueeze(1).repeat(1, self.n_tokens, 1)#My comment: shape [B, 1, D]-> [B, N, D]
         return ConditioningSet(tokens=tokens, pooled=vecs)
 
 
@@ -46,7 +51,7 @@ class ToyImageEncoder(nn.Module):
         self.embed_dim = int(cfg.encoders.dim)
         self.grid = int(cfg.encoders.get("toy_grid", 4))
         self.device = cfg.device
-        self.proj = nn.Conv2d(3, self.embed_dim, kernel_size=3, padding=1)
+        self.proj = nn.Conv2d(3, self.embed_dim, kernel_size=3, padding=1)#My comment: input-> [B, 3, H, W] output-> [B, D, H, W]
         self.pool = nn.AdaptiveAvgPool2d(self.grid)
         for p in self.parameters():
             p.requires_grad_(False)

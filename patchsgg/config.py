@@ -29,7 +29,7 @@ class AttrDict(dict):
         return AttrDict(value) if isinstance(value, dict) else value
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def _deep_merge(base: dict, override: dict) -> dict: #My comment: internal helper that combines two nested dictionaries.
     out = dict(base)
     for k, v in override.items():
         if k in out and isinstance(out[k], dict) and isinstance(v, dict):
@@ -39,7 +39,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
-def _load_raw(path: str) -> dict:
+def _load_raw(path: str) -> dict: #My comment: reads a YAML file and returns a plain dictionary.
     with open(path) as f:
         data = yaml.safe_load(f) or {}
     base = data.pop("_base_", None)
@@ -49,7 +49,7 @@ def _load_raw(path: str) -> dict:
     return data
 
 
-def as_container(cfg) -> dict:
+def as_container(cfg) -> dict: #My comment: normalizes a runtime config into a regular Python dictionary
     """Convert any config (AttrDict / OmegaConf / dict) to a plain nested dict."""
     try:
         from omegaconf import OmegaConf
@@ -61,7 +61,7 @@ def as_container(cfg) -> dict:
     return dict(cfg)
 
 
-def as_config(obj):
+def as_config(obj):#My comment: Converting a dictionary back to a runtime config-> performs the reverse of as_container
     """Wrap a plain dict back into a usable config (OmegaConf if available, else AttrDict)."""
     try:
         from omegaconf import OmegaConf

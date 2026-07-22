@@ -67,6 +67,7 @@ def canonical_tuple(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> MatcherTuple
         vocab.entity_token(rel.obj_cls),
         rel.obj_inst,
     )
+    #My comment: produces the special tuple format expected by LF-SGG matching and metrics.
 
 
 def graph_to_matcher_tuples(graph: Graph, vocab: GraphVocab = VG_VOCAB) -> List[MatcherTuple]:
