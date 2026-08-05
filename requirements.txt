@@ -27,3 +27,4 @@ Cython>=3.0
 pytest
 ruff
 scipy   # optional: optimal Hungarian assignment for order_agnostic loss (greedy fallback otherwise)
+transformers>=4.40,<5

@@ -90,6 +90,14 @@ class GPT2CrossAttnDecoder(GraphDecoder):
             )
 
         target_positions = max(native_positions, int(max_seq_len))
+        if target_positions > native_positions:
+            import warnings
+            warnings.warn(
+                f"Extending GPT-2 positions from {native_positions} "
+                f"to {target_positions}. Positions above "
+                f"{native_positions - 1} are randomly initialized.",
+                stacklevel=2,
+            )
         hf_cfg.add_cross_attention = True
         hf_cfg.is_decoder = True
         hf_cfg.n_positions = target_positions

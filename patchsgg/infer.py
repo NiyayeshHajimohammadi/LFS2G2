@@ -57,9 +57,27 @@ def main(argv: List[str] | None = None):
     accelerator, device = _resolve_accelerator(cli_cfg)
     cli_cfg.device = device
 
-    model = SGGLightning.from_checkpoint(args.ckpt, map_location=device)
+    model = SGGLightning.from_checkpoint(
+        args.ckpt,
+        map_location=device,
+    )
+
     model.eval()
-    _assert_vocab_compatible(cli_cfg, model.model.vocab)
+
+    _assert_vocab_compatible(
+        cli_cfg,
+        model.model.vocab,
+    )
+
+    # Apply inference-time settings from the command-line config.
+    #
+    # This allows:
+    #   --override eval.max_rels=300
+    #   --override eval.top_p=0.95
+    #   --override eval.temperature=1.75
+    model.model.set_generation_config(
+        cli_cfg.eval
+    )
 
     data_cfg = _data_runtime_config(cli_cfg, model.cfg, device)
     vocab = model.model.vocab

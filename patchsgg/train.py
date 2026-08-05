@@ -9,7 +9,10 @@ from typing import List
 
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import (
+    EarlyStopping,
+    ModelCheckpoint,
+)
 
 from patchsgg.config import load_config
 from patchsgg.lightning_module import SGGDataModule, SGGLightning
@@ -46,10 +49,18 @@ def main(argv: List[str] | None = None):
         accelerator=accelerator,
         devices=1,
         default_root_dir=out_dir,
-        check_val_every_n_epoch=int(cfg.train.get("eval_every_epochs", 1)),
-        log_every_n_steps=int(cfg.train.get("log_every_steps", 50)),
+        check_val_every_n_epoch=int(
+            cfg.train.get("eval_every_epochs", 1)
+        ),
+        log_every_n_steps=int(
+            cfg.train.get("log_every_steps", 50)
+        ),
         gradient_clip_val=grad_clip,
-        callbacks=[ckpt_cb],
+        precision=cfg.train.get("precision", "32-true"),
+        accumulate_grad_batches=int(
+            cfg.train.get("accumulate_grad_batches", 1)
+        ),
+        callbacks=callbacks,
     )
     trainer.fit(model, datamodule=dm, ckpt_path=args.ckpt)
     print(f"done. best={ckpt_cb.best_model_path or '(n/a)'}  last={ckpt_cb.last_model_path}")

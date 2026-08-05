@@ -12,8 +12,10 @@ import torch.nn as nn
 
 from patchsgg.encoders.base import ConditioningSet #My comment: The obj that caontains tokens, pooled and mask-> expected shapes: [B,N,D],[B,D],[B,N]
 from patchsgg.decoder.sampling import GenConfig, constrained_generate #My comment: GenConfig stores inference settings
-#My comment: constrained_generate: performs token-by-token generation while enforcing the five-token grammar.
-from patchsgg.graph_seq.vocab import GraphVocab #My comment: GraphVocab defines what every integer token means.
+from patchsgg.graph_seq.vocab import (
+    TOKENS_PER_REL,
+    GraphVocab,
+)
 
 
 class GraphDecoder(nn.Module):
@@ -64,17 +66,73 @@ class GraphDecoder(nn.Module):
 
 
 def build_decoder(cfg, vocab: GraphVocab, cond_dim: int) -> GraphDecoder:
-    kind = cfg.decoder.type
-    # positional table must cover both teacher-forced training length (max_num_rels) and the
-    # autoregressive generation length (eval.max_rels), whichever is larger.
-    max_rels = max(vocab.max_num_rels, int(cfg.eval.get("max_rels", 100)))
-    #My comment: Prepare the shared arguments
-    common = dict(
-        vocab=vocab,
-        cond_dim=cond_dim,
-        d_model=int(cfg.decoder.d_model),
-        max_seq_len=2 + max_rels * 5,
+    kind = str(cfg.decoder.type)
+
+    minimum_seq_len = (
+        1
+        + max(
+            vocab.max_num_rels,
+            int(cfg.eval.get("max_rels", 100)),
+        )
+        * TOKENS_PER_REL
     )
+
+    max_seq_len = int(
+        cfg.decoder.get("max_seq_len", minimum_seq_len)
+    )
+
+    if max_seq_len < minimum_seq_len:
+        raise ValueError(
+            f"decoder.max_seq_len={max_seq_len} is too small; "
+            f"at least {minimum_seq_len} positions are required"
+        )
+
+    if kind == "gpt2_cross_attn":
+        from patchsgg.decoder.gpt2_decoder import GPT2CrossAttnDecoder
+
+        return GPT2CrossAttnDecoder(
+            vocab=vocab,
+            cond_dim=cond_dim,
+            max_seq_len=max_seq_len,
+            model_name=str(
+                cfg.decoder.get(
+                    "model_name",
+                    "openai-community/gpt2",
+                )
+            ),
+            revision=str(cfg.decoder.get("revision", "main")),
+            cache_dir=cfg.decoder.get("cache_dir", None),
+            local_files_only=bool(
+                cfg.decoder.get("local_files_only", False)
+            ),
+            gradient_checkpointing=bool(
+                cfg.decoder.get(
+                    "gradient_checkpointing",
+                    True,
+                )
+            ),
+            freeze_pretrained=bool(
+                cfg.decoder.get("freeze_pretrained", False)
+            ),
+            tie_graph_embeddings=bool(
+                cfg.decoder.get(
+                    "tie_graph_embeddings",
+                    True,
+                )
+            ),
+            extend_positions=bool(
+                cfg.decoder.get("extend_positions", True)
+            ),
+            dropout=float(cfg.decoder.get("dropout", 0.1)),
+        )
+
+    common = {
+        "vocab": vocab,
+        "cond_dim": cond_dim,
+        "d_model": int(cfg.decoder.d_model),
+        "max_seq_len": max_seq_len,
+    }
+
     if kind == "cross_attn":
         from patchsgg.decoder.cross_attn_decoder import CrossAttnDecoder
 
@@ -85,6 +143,7 @@ def build_decoder(cfg, vocab: GraphVocab, cond_dim: int) -> GraphDecoder:
             dropout=float(cfg.decoder.dropout),
             **common,
         )
+
     if kind == "prefix":
         from patchsgg.decoder.prefix_decoder import PrefixDecoder
 
@@ -95,4 +154,5 @@ def build_decoder(cfg, vocab: GraphVocab, cond_dim: int) -> GraphDecoder:
             dropout=float(cfg.decoder.dropout),
             **common,
         )
+
     raise ValueError(f"unknown decoder.type {kind!r}")

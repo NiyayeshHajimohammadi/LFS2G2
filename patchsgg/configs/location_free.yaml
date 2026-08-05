@@ -35,12 +35,14 @@ vocab:
 # EVA ViT at 448 px. This repository does not implement EVA, so CLIP ViT-B/16
 # patch tokens are the closest directly supported image-only substitute.
 encoders:
-  space: clip                    # toy | clip | dinov2_talk2dino
+  space: clip
   clip_model: ViT-B/16
-  image_token_mode: patch        # use the full patch-token set, not pooled CLS
-  text_token_mode: pooled        # unused because train/eval modalities are image
-  max_text_tokens: 32            # unused in this experiment
-  resize_dim: 224                # native CLIP ViT-B/16 image resolution
+  image_token_mode: patch
+  text_token_mode: pooled
+  max_text_tokens: 32
+
+  resize_dim: 224
+  clip_resize_dim: 224
 
 # -----------------------------------------------------------------------------
 # Conditioning bridge
@@ -73,12 +75,15 @@ decoder:
   type: gpt2_cross_attn
   model_name: openai-community/gpt2
   revision: main
-  cache_dir: null                 # null -> Hugging Face's normal cache directory
-  local_files_only: false         # true after the checkpoint is cached for offline runs
+  cache_dir: null
+  local_files_only: false
 
-  freeze_pretrained: false        # fine-tune GPT-2 self-attention/MLP weights
-  gradient_checkpointing: true    # reduce training memory
-  tie_graph_embeddings: true      # tie graph input embedding and output head
+  freeze_pretrained: false
+  gradient_checkpointing: true
+  tie_graph_embeddings: true
+
+  # START + 300 × 5 tokens
+  max_seq_len: 1501
   extend_positions: true
   dropout: 0.1
 
@@ -101,11 +106,8 @@ loss:
 # Visual Genome data
 # -----------------------------------------------------------------------------
 data:
-  dataset: vg                    # vg | toy
-
-  # These text-view options are unused in image-conditioned training, but are
-  # kept explicit because they are part of this project's data config schema.
-  text_view: serialize           # serialize | llm_caption | mix
+  dataset: vg
+  text_view: serialize
   serialize_with_instances: false
   captions_cache: null
 
@@ -114,12 +116,13 @@ data:
     dict_file: data/vg/VG-SGG-dicts.json
     image_meta: data/vg/image_data.json
     image_dir: data/vg/images
+
     instance_iou: 0.5
     num_val_images: 5000
+    num_images: -1
     filter_empty_rels: true
-    deduplicate_relations: false
-    image_resize_mode: center_crop   # center_crop | stretch
-    num_images: -1               # -1 = use the complete split
+    filter_duplicate_rels: false
+    image_resize_mode: center_crop             # -1 = use the complete split
 
 # -----------------------------------------------------------------------------
 # Optimization
@@ -130,14 +133,20 @@ data:
 # This repository currently has no EarlyStopping callback, so max_epochs is the
 # hard stopping point unless training is stopped manually or the callback is added.
 train:
-  train_modality: image          # crucial: makes this non-zero-shot
-  batch_size: 16
+  train_modality: image
+
+  batch_size: 2
+  accumulate_grad_batches: 8
+
   lr: 4.0e-5
   weight_decay: 1.0e-4
   max_epochs: 200
   eval_every_epochs: 5
   log_every_steps: 50
   grad_clip: 0.1
+
+  precision: 16-mixed
+  early_stopping_patience: 10
 
 # -----------------------------------------------------------------------------
 # Location-free inference and evaluation
@@ -146,15 +155,17 @@ train:
 # 1.75 and top-p 0.95; greedily choose instance and predicate tokens; evaluate
 # R@20/R@50/R@100 with heuristic matcher branching factor B=3.
 eval:
-  eval_modality: image           # crucial: image -> graph evaluation
-  batch_size: 1                  # conservative for uncached 300-relation AR decoding
+  eval_modality: image
+  batch_size: 1
   ks: [20, 50, 100]
-  max_rels: 300
+
+  max_rels: 55
   temperature: 1.75
   top_p: 0.95
   top_k: 0
   entity_sampling: stochastic
-  allow_end: false               # upstream Pix2SG generates a fixed number of relations
+  allow_end: false
+
   matcher_n: 3
   matcher_depth: 10
   matcher_identity_fallback: false

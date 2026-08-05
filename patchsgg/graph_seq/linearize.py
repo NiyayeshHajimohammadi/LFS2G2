@@ -166,7 +166,63 @@ def build_train_pair(
     target_arr = np.asarray(target_seq, dtype=np.int64)
     assert len(input_arr) == len(target_arr), (len(input_arr), len(target_arr))
     return input_arr, target_arr
+def permute_and_reindex_graph(
+    graph: Graph,
+    vocab: GraphVocab = VG_VOCAB,
+    rng: Optional[np.random.Generator] = None,
+    shuffle: bool = True,
+) -> Graph:
+    """Permute relations and assign per-class instance IDs by first appearance."""
+    rng = rng or np.random.default_rng()
+    ordered = list(graph)
 
+    if shuffle and len(ordered) > 1:
+        permutation = rng.permutation(len(ordered))
+        ordered = [ordered[int(i)] for i in permutation]
+
+    instance_mapping: dict[tuple[int, int], int] = {}
+    next_instance: dict[int, int] = {}
+
+    def remap(class_id: int, old_instance: int) -> int:
+        key = (int(class_id), int(old_instance))
+
+        if key not in instance_mapping:
+            new_instance = next_instance.get(int(class_id), 0)
+
+            if new_instance >= vocab.max_instance_id:
+                raise ValueError(
+                    f"Class {class_id} contains more than "
+                    f"{vocab.max_instance_id} distinguishable instances"
+                )
+
+            instance_mapping[key] = new_instance
+            next_instance[int(class_id)] = new_instance + 1
+
+        return instance_mapping[key]
+
+    remapped: Graph = []
+
+    for relation in ordered:
+        subject_instance = remap(
+            relation.subj_cls,
+            relation.subj_inst,
+        )
+        object_instance = remap(
+            relation.obj_cls,
+            relation.obj_inst,
+        )
+
+        remapped.append(
+            Relation(
+                subj_cls=relation.subj_cls,
+                subj_inst=subject_instance,
+                predicate=relation.predicate,
+                obj_cls=relation.obj_cls,
+                obj_inst=object_instance,
+            )
+        )
+
+    return remapped
 # Problems: 
 # No range validation when constructing or decoding relations. Invalid indices silently produce invalid tokens.
 # Hard truncation to max_num_rels discards information for dense scenes without warning.

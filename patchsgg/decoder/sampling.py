@@ -99,6 +99,83 @@ def constrained_generate(
         seq = torch.cat([seq, nxt], dim=1)
         if bool(finished.all()):
             break
-
     return torch.cat(out_tokens, dim=1), torch.cat(out_scores, dim=1)
+
+
+@torch.no_grad()
+def sample_constrained_token(
+    logits: torch.Tensor,
+    step_index: int,
+    vocab: GraphVocab,
+    cfg: GenConfig,
+    finished: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Select one grammar-constrained next token.
+
+    Parameters
+    ----------
+    logits:
+        Full vocabulary logits with shape [B, V].
+    step_index:
+        Position excluding the START token.
+    finished:
+        Boolean tensor [B] indicating sequences that already emitted END.
+
+    Returns
+    -------
+    next_token:
+        Selected token IDs [B, 1].
+    score:
+        Selected-token probabilities [B, 1].
+    finished:
+        Updated finished mask [B].
+    """
+    if logits.ndim != 2:
+        raise ValueError(f"Expected logits [B, V], got {tuple(logits.shape)}")
+
+    role = vocab.role_at(step_index)
+    lo, hi = vocab.range_for_role(role)
+    masked = _select_range(logits, lo, hi)
+
+    at_tuple_start = step_index % TOKENS_PER_REL == 0
+    if cfg.allow_end and at_tuple_start:
+        masked[:, vocab.end_token] = logits[:, vocab.end_token]
+
+    if role is TokenType.ENTITY and cfg.entity_sampling == "stochastic":
+        temperature = float(cfg.temperature)
+        if temperature <= 0:
+            raise ValueError("temperature must be greater than zero")
+
+        filtered = top_k_top_p_filter(
+            masked / temperature,
+            top_k=int(cfg.top_k),
+            top_p=float(cfg.top_p),
+        )
+        probs = torch.softmax(filtered, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+
+    elif cfg.entity_sampling in ("stochastic", "greedy"):
+        probs = torch.softmax(masked, dim=-1)
+        next_token = probs.argmax(dim=-1, keepdim=True)
+
+    else:
+        raise ValueError(
+            "entity_sampling must be 'stochastic' or 'greedy', "
+            f"got {cfg.entity_sampling!r}"
+        )
+
+    score = probs.gather(dim=-1, index=next_token)
+
+    previously_finished = finished
+    next_token = next_token.masked_fill(
+        previously_finished.unsqueeze(1),
+        vocab.no_known_token,
+    )
+    score = score.masked_fill(previously_finished.unsqueeze(1), 0.0)
+
+    finished = finished | (
+        next_token.squeeze(1) == vocab.end_token
+    )
+
+    return next_token, score, finished
 #My comment: used after training to generate predictions
