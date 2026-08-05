@@ -22,10 +22,16 @@ def test_lightning_fast_dev_run(tmp_path):
             f"output_dir={tmp_path.as_posix()}",
         ],
     )
-    cfg.device = "cpu"
+    cfg.device = "cuda"
     dm = SGGDataModule(cfg)
     model = SGGLightning(cfg)
-    trainer = pl.Trainer(accelerator="cpu", devices=1, fast_dev_run=True, logger=False, enable_checkpointing=False)
+    trainer = pl.Trainer(
+        accelerator="gpu",
+        devices=1,
+        fast_dev_run=True,
+        logger=False,
+        enable_checkpointing=False,
+    )
     trainer.fit(model, datamodule=dm)  # one train + one val batch; asserts the wiring runs
 
 
@@ -34,10 +40,16 @@ def test_checkpoint_roundtrip(tmp_path):
         "patchsgg/configs/diagnostic_text2text.yaml",
         ["vocab.max_num_rels=6", "data.toy_n_train=16", "data.toy_n_val=8", "train.batch_size=8"],
     )
-    cfg.device = "cpu"
+    cfg.device = "cuda"
     model = SGGLightning(cfg)
     ckpt = tmp_path / "m.ckpt"
-    trainer = pl.Trainer(accelerator="cpu", devices=1, fast_dev_run=True, logger=False, enable_checkpointing=False)
+    trainer = pl.Trainer(
+        accelerator="gpu",
+        devices=1,
+        fast_dev_run=True,
+        logger=False,
+        enable_checkpointing=False,
+    )
     trainer.fit(model, datamodule=SGGDataModule(cfg))
     trainer.save_checkpoint(ckpt.as_posix())
     reloaded = SGGLightning.from_checkpoint(ckpt.as_posix())

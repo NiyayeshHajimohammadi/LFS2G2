@@ -27,12 +27,12 @@ def _tiny_cfg():
 def test_train_step_and_predict_pipeline():
     torch.manual_seed(0)
     cfg = _tiny_cfg()
-    cfg.device = "cpu"
+    cfg.device = "cuda"
     vocab = build_vocab(cfg)
     collate = GraphCollator(vocab=vocab, seed=0)
     ds = build_dataset(cfg, "train", vocab)
     loader = DataLoader(ds, batch_size=8, shuffle=True, collate_fn=collate)
-    model = PatchSGGModel(cfg)
+    model = PatchSGGModel(cfg).to(cfg.device)
 
     # encoders are frozen; only the decoder trains
     assert all(not p.requires_grad for p in model.text_encoder.parameters())
@@ -71,12 +71,12 @@ def test_text2text_overfits_recall():
     """After enough steps the decoder should recover a non-trivial fraction of train graphs."""
     torch.manual_seed(0)
     cfg = _tiny_cfg()
-    cfg.device = "cpu"
+    cfg.device = "cuda"
     vocab = build_vocab(cfg)
     collate = GraphCollator(vocab=vocab, seed=0)
     ds = build_dataset(cfg, "train", vocab)
     loader = DataLoader(ds, batch_size=8, shuffle=True, collate_fn=collate)
-    model = PatchSGGModel(cfg)
+    model = PatchSGGModel(cfg).to(cfg.device)
     opt = torch.optim.AdamW(model.trainable_parameters(), lr=3e-3)
     model.train()
     for _ in range(120):
