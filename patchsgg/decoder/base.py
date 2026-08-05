@@ -1,85 +1,99 @@
-"""Autoregressive graph decoders over the flat 5-tuple vocabulary.
-
-Shared machinery (token/positional embeddings, output head, constrained generation) lives here;
-subclasses only implement ``_hidden(cond, tokens) -> [B, T, d_model]``. Both consume a
-:class:`ConditioningSet`, so pooled vs patch-set conditioning is just ``N==1`` vs ``N>1``.
-"""
-#My comment: defines common machinery that both cross_attn_decoder.py and prefix_decoder.py reuse->provides a level of abstraction just needs hidden states
+"""Autoregressive graph decoders over the flat five-token relation vocabulary."""
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
-from patchsgg.encoders.base import ConditioningSet #My comment: The obj that caontains tokens, pooled and mask-> expected shapes: [B,N,D],[B,D],[B,N]
-from patchsgg.decoder.sampling import GenConfig, constrained_generate #My comment: GenConfig stores inference settings
-from patchsgg.graph_seq.vocab import (
-    TOKENS_PER_REL,
-    GraphVocab,
-)
+from patchsgg.decoder.sampling import GenConfig, constrained_generate
+from patchsgg.encoders.base import ConditioningSet
+from patchsgg.graph_seq.vocab import TOKENS_PER_REL, GraphVocab
 
 
 class GraphDecoder(nn.Module):
-    def __init__(self, vocab: GraphVocab, cond_dim: int, d_model: int = 512, max_seq_len: int = 512):
-        super().__init__() 
-        self.vocab = vocab
-        self.d_model = d_model
-        self.cond_proj = nn.Linear(cond_dim, d_model)#My comment: a learnable linear projection from encoder feature dimension to decoder dimension-> [B, N, cond_dim] → [B, N, d_model]
-        self.token_embed = nn.Embedding(vocab.vocab_size, d_model)#My comment: converts discrete graph token IDs into continuous vectors:[B, T] → [B, T, d_model]
-        self.pos_embed = nn.Embedding(max_seq_len, d_model)#My comment: creates a learnable positional embedding table-> shape pos_embed: [max_seq_len, d_model]
-        self.norm = nn.LayerNorm(d_model)#My comment:  normalizes hidden vectors.
-        self.head = nn.Linear(d_model, vocab.vocab_size)#My comment: maps every hidden vector to one logit per vocabulary token [B, T, d_model] → [B, T, vocab_size]
-        self.max_seq_len = max_seq_len
+    """Shared token embeddings, output head, and generation for graph decoders."""
 
-    # --- subclasses implement this -----------------------------------------------------------
-    def _hidden(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:#My comment: expected output [B, T, d_model]
+    def __init__(
+        self,
+        vocab: GraphVocab,
+        cond_dim: int,
+        d_model: int = 512,
+        max_seq_len: int = 512,
+    ):
+        super().__init__()
+        self.vocab = vocab
+        self.d_model = int(d_model)
+        self.max_seq_len = int(max_seq_len)
+
+        self.cond_proj = nn.Linear(cond_dim, self.d_model)
+        self.token_embed = nn.Embedding(vocab.vocab_size, self.d_model)
+        self.pos_embed = nn.Embedding(self.max_seq_len, self.d_model)
+        self.norm = nn.LayerNorm(self.d_model)
+        self.head = nn.Linear(self.d_model, vocab.vocab_size)
+
+    def _hidden(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:
+        """Return decoder hidden states with shape ``[B, T, d_model]``."""
         raise NotImplementedError
 
-    def _embed_tokens(self, tokens: torch.Tensor) -> torch.Tensor: #My comment: This internal helper combines graph-token and positional embeddings.
-        #My comment: Expected inout: tokens: [B, T], dtype=torch.long/ Expected output: Zero-shotCross-modalTransferForLocation-freeSceneGraphGeneration
-        pos = torch.arange(tokens.shape[1], device=tokens.device)
-        return self.token_embed(tokens) + self.pos_embed(pos)[None]#My comment: [B, T, d_model] + [1, T, d_model]
+    def _embed_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
+        if tokens.shape[1] > self.max_seq_len:
+            raise ValueError(
+                f"token sequence length {tokens.shape[1]} exceeds decoder context "
+                f"{self.max_seq_len}"
+            )
+        positions = torch.arange(tokens.shape[1], device=tokens.device)
+        return self.token_embed(tokens) + self.pos_embed(positions)[None]
 
     def logits(self, cond: ConditioningSet, tokens: torch.Tensor) -> torch.Tensor:
-        #My comment: takes the decoder’s internal hidden representations and converts them into scores for every token in the graph vocabulary.
         return self.head(self.norm(self._hidden(cond, tokens)))
 
     def forward(self, cond: ConditioningSet, input_tokens: torch.Tensor) -> torch.Tensor:
-        """Teacher-forced logits ``[B, T, V]`` aligned to the target sequence."""
+        """Teacher-forced logits ``[B, T, V]`` aligned to target tokens."""
         return self.logits(cond, input_tokens)
-        #My comment: teacher-forcing shift itself is created by build_train_pair() in graph_seq/linearize.py.
 
     @torch.no_grad()
     def generate(self, cond: ConditioningSet, gen_cfg: GenConfig):
-        #My comment: it basically generates what to feed the decoder in the next step
-        B = cond.batch_size
-        start = torch.full((B, 1), self.vocab.start_token, dtype=torch.long, device=cond.tokens.device)
+        """Generate with full-prefix recomputation for non-cached decoders."""
+        required_positions = 1 + int(gen_cfg.max_rels) * TOKENS_PER_REL
+        if required_positions > self.max_seq_len:
+            raise ValueError(
+                f"generation needs {required_positions} positions but decoder has "
+                f"{self.max_seq_len}"
+            )
 
-        def step_fn(tokens: torch.Tensor) -> torch.Tensor:
-            return self.logits(cond, tokens)[:, -1]
-            #My comment: constrained_generate expects a function that maps the current prefix to next-token logits
+        start_tokens = torch.full(
+            (cond.batch_size, 1),
+            self.vocab.start_token,
+            dtype=torch.long,
+            device=cond.tokens.device,
+        )
 
-        return constrained_generate(step_fn, start, self.vocab, gen_cfg)
+        def step_fn(sequence: torch.Tensor) -> torch.Tensor:
+            return self.logits(cond, sequence)[:, -1]
+
+        return constrained_generate(
+            step_fn=step_fn,
+            start_tokens=start_tokens,
+            vocab=self.vocab,
+            cfg=gen_cfg,
+        )
 
     @staticmethod
-    def causal_mask(T: int, device) -> torch.Tensor:
-        return torch.triu(torch.full((T, T), float("-inf"), device=device), diagonal=1)
+    def causal_mask(length: int, device) -> torch.Tensor:
+        return torch.triu(
+            torch.full((length, length), float("-inf"), device=device),
+            diagonal=1,
+        )
 
 
 def build_decoder(cfg, vocab: GraphVocab, cond_dim: int) -> GraphDecoder:
+    """Construct the decoder selected by ``cfg.decoder.type``."""
     kind = str(cfg.decoder.type)
 
-    minimum_seq_len = (
-        1
-        + max(
-            vocab.max_num_rels,
-            int(cfg.eval.get("max_rels", 100)),
-        )
-        * TOKENS_PER_REL
-    )
-
-    max_seq_len = int(
-        cfg.decoder.get("max_seq_len", minimum_seq_len)
-    )
+    minimum_seq_len = 1 + max(
+        vocab.max_num_rels,
+        int(cfg.eval.get("max_rels", 100)),
+    ) * TOKENS_PER_REL
+    max_seq_len = int(cfg.decoder.get("max_seq_len", minimum_seq_len))
 
     if max_seq_len < minimum_seq_len:
         raise ValueError(
@@ -95,34 +109,19 @@ def build_decoder(cfg, vocab: GraphVocab, cond_dim: int) -> GraphDecoder:
             cond_dim=cond_dim,
             max_seq_len=max_seq_len,
             model_name=str(
-                cfg.decoder.get(
-                    "model_name",
-                    "openai-community/gpt2",
-                )
+                cfg.decoder.get("model_name", "openai-community/gpt2")
             ),
             revision=str(cfg.decoder.get("revision", "main")),
             cache_dir=cfg.decoder.get("cache_dir", None),
-            local_files_only=bool(
-                cfg.decoder.get("local_files_only", False)
-            ),
+            local_files_only=bool(cfg.decoder.get("local_files_only", False)),
             gradient_checkpointing=bool(
-                cfg.decoder.get(
-                    "gradient_checkpointing",
-                    True,
-                )
+                cfg.decoder.get("gradient_checkpointing", True)
             ),
-            freeze_pretrained=bool(
-                cfg.decoder.get("freeze_pretrained", False)
-            ),
+            freeze_pretrained=bool(cfg.decoder.get("freeze_pretrained", False)),
             tie_graph_embeddings=bool(
-                cfg.decoder.get(
-                    "tie_graph_embeddings",
-                    True,
-                )
+                cfg.decoder.get("tie_graph_embeddings", True)
             ),
-            extend_positions=bool(
-                cfg.decoder.get("extend_positions", True)
-            ),
+            extend_positions=bool(cfg.decoder.get("extend_positions", True)),
             dropout=float(cfg.decoder.get("dropout", 0.1)),
         )
 

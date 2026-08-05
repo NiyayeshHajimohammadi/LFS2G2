@@ -15,7 +15,7 @@ ftfy
 regex
 timm
 open_clip_torch
-# OpenAI CLIP from source: pip install git+https://github.com/openai/CLIP.git
+git+https://github.com/openai/CLIP.git
 
 # Optional: offline LLM caption generation
 # anthropic

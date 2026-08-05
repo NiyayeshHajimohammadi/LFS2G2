@@ -1,9 +1,4 @@
-"""Unified conditioning interface shared by the text (train) and image (inference) paths.
-
-The decoder never sees an encoder directly -- it sees a :class:`ConditioningSet`. This is what
-makes train(text)->infer(image) transfer a config switch rather than a code change, and what lets
-us toggle pooled-vector vs patch-token-set conditioning uniformly.
-"""
+"""Unified conditioning interface for text and image encoders."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,17 +9,36 @@ import torch
 
 @dataclass
 class ConditioningSet:
-    """Modality-agnostic conditioning.
+    """Modality-agnostic conditioning tensors.
 
-    tokens: ``[B, N, D]`` per-token features (text tokens, or image patch tokens). May be a
-            single token (``N==1``) for the pooled baseline. (N is the number of conditioning tokens)
-    pooled: ``[B, D]`` global feature (CLS / EOS / mean).
-    mask:   ``[B, N]`` boolean, True = valid token (for variable-length text). None => all valid.
+    ``tokens`` has shape ``[B, N, D]``; ``pooled`` has shape ``[B, D]``;
+    ``mask`` is optional ``[B, N]`` with ``True`` for valid positions.
     """
-    #My comment: stores the outputs of an encoder in a standardized format.
-    tokens: torch.Tensor #My comment: the main conditioning tensor shape [B, N, D]
-    pooled: torch.Tensor #My comment: one global feature vector per input sample shape [B, D]
-    mask: Optional[torch.Tensor] = None #My comment: which token is valid and which is not [B, N]
+
+    tokens: torch.Tensor
+    pooled: torch.Tensor
+    mask: Optional[torch.Tensor] = None
+
+    def __post_init__(self) -> None:
+        if self.tokens.ndim != 3:
+            raise ValueError(
+                f"tokens must have shape [B, N, D], got {tuple(self.tokens.shape)}"
+            )
+        if self.pooled.ndim != 2:
+            raise ValueError(
+                f"pooled must have shape [B, D], got {tuple(self.pooled.shape)}"
+            )
+        if self.tokens.shape[0] != self.pooled.shape[0]:
+            raise ValueError("tokens and pooled must have the same batch size")
+        if self.tokens.shape[-1] != self.pooled.shape[-1]:
+            raise ValueError("tokens and pooled must have the same feature dimension")
+        if self.mask is not None:
+            if self.mask.shape != self.tokens.shape[:2]:
+                raise ValueError(
+                    f"mask must have shape {tuple(self.tokens.shape[:2])}, "
+                    f"got {tuple(self.mask.shape)}"
+                )
+            self.mask = self.mask.bool()
 
     @property
     def dim(self) -> int:
@@ -42,15 +56,14 @@ class ConditioningSet:
         )
 
     def as_pooled(self) -> "ConditioningSet":
-        """Collapse to a single conditioning token (the pooled baseline)."""
-        return ConditioningSet(tokens=self.pooled.unsqueeze(1), pooled=self.pooled, mask=None) #My comment: Treat this embedding as a sequence containing exactly one token.
-        #My comment: Masks are needed when different samples have different numbers of tokens.
+        return ConditioningSet(
+            tokens=self.pooled.unsqueeze(1),
+            pooled=self.pooled,
+            mask=None,
+        )
 
 
 class Encoder(Protocol):
-    """Frozen encoder producing a :class:`ConditioningSet`. ``modality`` is 'text' or 'image'."""
-    #My comment: Anything implementing these members is considered an Encoder
-
     modality: str
     embed_dim: int
 
@@ -58,36 +71,50 @@ class Encoder(Protocol):
         ...
 
 
-def build_encoders(cfg) -> tuple["Encoder", "Encoder"]:
-    """Build the (text_encoder, image_encoder) pair selected by ``cfg.encoders.space``.
+def build_encoders(
+    cfg,
+    *,
+    need_text: bool = True,
+    need_image: bool = True,
+) -> tuple[Optional["Encoder"], Optional["Encoder"]]:
+    """Build only the encoder modalities required by the selected experiment."""
+    if not need_text and not need_image:
+        raise ValueError("at least one encoder modality must be requested")
 
-    Imports are local so a missing heavy dependency (DINOv2/CLIP/Talk2DINO) only breaks the path
-    that actually needs it, not the whole package.
-    """
-    #My comment: factory function:)))->selects and constructs the text/image encoder pair specified in the configuration.
-    space = cfg.encoders.space
+    space = str(cfg.encoders.space)
+    text = None
+    image = None
+
     if space == "toy":
-        from patchsgg.encoders.toy import ToyImageEncoder, ToyTextEncoder
+        if need_text:
+            from patchsgg.encoders.toy import ToyTextEncoder
 
-        return ToyTextEncoder(cfg), ToyImageEncoder(cfg)
+            text = ToyTextEncoder(cfg)
+        if need_image:
+            from patchsgg.encoders.toy import ToyImageEncoder
+
+            image = ToyImageEncoder(cfg)
+        return text, image
+
     if space == "dinov2_talk2dino":
-        from patchsgg.encoders.image_encoder import DinoV2ImageEncoder
-        from patchsgg.encoders.text_encoder import Talk2DinoTextEncoder
+        if need_text:
+            from patchsgg.encoders.text_encoder import Talk2DinoTextEncoder
 
-        text = Talk2DinoTextEncoder(cfg)
-        image = DinoV2ImageEncoder(cfg)
+            text = Talk2DinoTextEncoder(cfg)
+        if need_image:
+            from patchsgg.encoders.image_encoder import DinoV2ImageEncoder
+
+            image = DinoV2ImageEncoder(cfg)
     elif space == "clip":
-        from patchsgg.encoders.image_encoder import ClipImageEncoder
-        from patchsgg.encoders.text_encoder import ClipTextEncoder
+        if need_text:
+            from patchsgg.encoders.text_encoder import ClipTextEncoder
 
-        text = ClipTextEncoder(cfg)
-        image = ClipImageEncoder(cfg)
+            text = ClipTextEncoder(cfg)
+        if need_image:
+            from patchsgg.encoders.image_encoder import ClipImageEncoder
+
+            image = ClipImageEncoder(cfg)
     else:
         raise ValueError(f"unknown encoders.space={space!r}")
-    return text, image
 
-# Problems:
-# Missing shape validation (Medium severity)->Nothing checks these assumptions.A malformed encoder could silently return inconsistent shapes, and the error might only appear much later in the decoder.Adding validation in __post_init__() would make debugging much easier.
-# Device consistency (Low severity)->to() moves every tensor, but there is no verification that all tensors originally reside on the same device. In practice this is usually fine, but explicit consistency checks can prevent subtle bugs.
-# Modality string (Low severity)->The protocol documents modality as "text" or "image", but this is only a convention. An Enum instead of a free-form string would prevent accidental typos such as "images" or "img".
-# Runtime protocol checking (Very low severity)-> Protocol improves static type checking but does not enforce the interface at runtime. If you wanted runtime validation, you could decorate it with @runtime_checkable and use isinstance(). For this project, static checking is probably sufficient.
+    return text, image

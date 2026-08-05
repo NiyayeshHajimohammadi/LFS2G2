@@ -41,6 +41,10 @@ encoders:
   text_token_mode: pooled
   max_text_tokens: 32
 
+  # This experiment is image-conditioned for both training and evaluation, so
+  # avoid loading an unused second CLIP model for the text encoder.
+  build_only_required: true
+
   resize_dim: 224
   clip_resize_dim: 224
 
@@ -122,7 +126,7 @@ data:
     num_images: -1
     filter_empty_rels: true
     filter_duplicate_rels: false
-    image_resize_mode: center_crop             # -1 = use the complete split
+    image_resize_mode: center_crop
 
 # -----------------------------------------------------------------------------
 # Optimization
@@ -130,8 +134,8 @@ data:
 # Paper: AdamW, constant lr 4e-5, weight decay 1e-4, batch size 16,
 # gradient clipping 0.1, up to 200 epochs with early stopping.
 #
-# This repository currently has no EarlyStopping callback, so max_epochs is the
-# hard stopping point unless training is stopped manually or the callback is added.
+# Early stopping monitors validation R@20. Patience counts validation checks,
+# not individual epochs.
 train:
   train_modality: image
 

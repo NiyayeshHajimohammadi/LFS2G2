@@ -82,3 +82,20 @@ def test_build_train_pair_no_padding():
     inp, tgt = build_train_pair(graph, pad_to_max=False)
     assert len(inp) == 1 + 5 * len(graph)
     assert tgt[-1] == VG_VOCAB.end_token
+
+
+def test_permute_and_reindex_assigns_ids_by_first_appearance():
+    from patchsgg.graph_seq.linearize import permute_and_reindex_graph
+
+    graph = [
+        Relation(subj_cls=4, subj_inst=8, predicate=1, obj_cls=9, obj_inst=3),
+        Relation(subj_cls=4, subj_inst=2, predicate=2, obj_cls=9, obj_inst=3),
+        Relation(subj_cls=4, subj_inst=8, predicate=3, obj_cls=4, obj_inst=2),
+    ]
+    remapped = permute_and_reindex_graph(graph, shuffle=False)
+
+    assert remapped[0].subj_inst == 0
+    assert remapped[1].subj_inst == 1
+    assert remapped[2].subj_inst == 0
+    assert remapped[2].obj_inst == 1
+    assert remapped[0].obj_inst == remapped[1].obj_inst == 0

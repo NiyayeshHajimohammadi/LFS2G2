@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 
 from patchsgg.decoder.base import GraphDecoder
-from patchsgg.decoder.sampling import GenConfig, sample_constrained_token
+from patchsgg.decoder.sampling import GenConfig, constrained_generate
 from patchsgg.encoders.base import ConditioningSet
 from patchsgg.graph_seq.vocab import TOKENS_PER_REL, GraphVocab
 
@@ -210,46 +210,43 @@ class GPT2CrossAttnDecoder(GraphDecoder):
 
     @torch.no_grad()
     def generate(self, cond: ConditioningSet, gen_cfg: GenConfig):
-        """Cached constrained generation; avoids recomputing the full prefix each step."""
+        """Generate with GPT-2 key/value caching and shared LF-SGG constraints."""
         total_steps = int(gen_cfg.max_rels) * TOKENS_PER_REL
-        required_positions = 1 + total_steps  # START plus generated graph tokens
+        required_positions = 1 + total_steps
         if required_positions > self.max_seq_len:
             raise ValueError(
-                f"generation needs {required_positions} positions but GPT-2 has {self.max_seq_len}"
+                f"generation needs {required_positions} positions but GPT-2 has "
+                f"{self.max_seq_len}"
             )
 
-        device = cond.tokens.device
-        batch_size = cond.batch_size
-        current = torch.full(
-            (batch_size, 1), self.vocab.start_token, dtype=torch.long, device=device
+        start_tokens = torch.full(
+            (cond.batch_size, 1),
+            self.vocab.start_token,
+            dtype=torch.long,
+            device=cond.tokens.device,
         )
         memory, memory_mask = self._memory(cond)
-        past_key_values = None
-        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
-        out_tokens = []
-        out_scores = []
 
-        for step_index in range(total_steps):
+        def step_fn(sequence: torch.Tensor, past_key_values):
+            # On the first step sequence contains START. Afterwards GPT-2 only
+            # consumes the newest token because previous tokens are in the cache.
+            current_token = sequence if past_key_values is None else sequence[:, -1:]
             outputs = self.gpt2(
-                inputs_embeds=self.token_embed(current),
+                inputs_embeds=self.token_embed(current_token),
                 encoder_hidden_states=memory,
                 encoder_attention_mask=memory_mask,
                 past_key_values=past_key_values,
                 use_cache=True,
                 return_dict=True,
             )
-            past_key_values = outputs.past_key_values
             logits = self.head(outputs.last_hidden_state[:, -1])
-            current, score, finished = sample_constrained_token(
-                logits=logits,
-                step_index=step_index,
-                vocab=self.vocab,
-                cfg=gen_cfg,
-                finished=finished,
-            )
-            out_tokens.append(current)
-            out_scores.append(score)
-            if bool(finished.all()):
-                break
+            return logits, outputs.past_key_values
 
-        return torch.cat(out_tokens, dim=1), torch.cat(out_scores, dim=1)
+        return constrained_generate(
+            step_fn=step_fn,
+            start_tokens=start_tokens,
+            vocab=self.vocab,
+            cfg=gen_cfg,
+            initial_state=None,
+            stateful=True,
+        )
