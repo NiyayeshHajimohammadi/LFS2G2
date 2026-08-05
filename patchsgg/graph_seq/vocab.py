@@ -43,7 +43,7 @@ _SEQ_ROLE = [
     TokenType.PREDICATE, # 4 predicate
 ]
 
-TOKENS_PER_REL = 5 #Every complete relationship occupies exactly five tokens.
+TOKENS_PER_REL = 5
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,18 @@ class GraphVocab:
     max_num_rels: int = 55             # MAX_NUM_RELS
 
     pred_start: int = 0
+
+    def __post_init__(self) -> None:
+        for name in ("n_preds", "n_entities", "max_instance_id", "max_num_rels"):
+            if int(getattr(self, name)) <= 0:
+                raise ValueError(f"{name} must be positive, got {getattr(self, name)}")
+        if not 0 < self.random_max_instance_id <= self.max_instance_id:
+            raise ValueError(
+                "random_max_instance_id must be in [1, max_instance_id], got "
+                f"{self.random_max_instance_id} and {self.max_instance_id}"
+            )
+        if self.pred_start < 0:
+            raise ValueError(f"pred_start must be non-negative, got {self.pred_start}")
 
     @property
     def entity_start(self) -> int:
@@ -124,22 +136,34 @@ class GraphVocab:
 
     # ---- (de)tokenizing single fields ----------------------------------------------------
     def entity_token(self, class_idx: int) -> int:
-        return self.entity_start + class_idx
+        if not 0 <= int(class_idx) < self.n_entities:
+            raise ValueError(f"entity index outside [0, {self.n_entities}): {class_idx}")
+        return self.entity_start + int(class_idx)
 
     def predicate_token(self, pred_idx: int) -> int:
-        return self.pred_start + pred_idx
+        if not 0 <= int(pred_idx) < self.n_preds:
+            raise ValueError(f"predicate index outside [0, {self.n_preds}): {pred_idx}")
+        return self.pred_start + int(pred_idx)
 
     def instance_token(self, instance_idx: int) -> int:
-        return self.instance_start + instance_idx
+        if not 0 <= int(instance_idx) < self.max_instance_id:
+            raise ValueError(f"instance index outside [0, {self.max_instance_id}): {instance_idx}")
+        return self.instance_start + int(instance_idx)
 
     def entity_idx(self, token: int) -> int:
-        return token - self.entity_start
+        if not self.entity_range[0] <= int(token) < self.entity_range[1]:
+            raise ValueError(f"token {token} is not an entity token")
+        return int(token) - self.entity_start
 
     def predicate_idx(self, token: int) -> int:
-        return token - self.pred_start
+        if not self.pred_range[0] <= int(token) < self.pred_range[1]:
+            raise ValueError(f"token {token} is not a predicate token")
+        return int(token) - self.pred_start
 
     def instance_idx(self, token: int) -> int:
-        return token - self.instance_start
+        if not self.instance_range[0] <= int(token) < self.instance_range[1]:
+            raise ValueError(f"token {token} is not an instance token")
+        return int(token) - self.instance_start
 
 
 # Module-level default used throughout the codebase / tests.

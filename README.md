@@ -64,3 +64,20 @@ patchsgg-infer --config patchsgg/configs/default_crossattn_talk2dino.yaml --ckpt
 ```
 
 See `NOTICE.md` for upstream attribution.
+
+## Data loading contract
+
+`patchsgg.data` emits dictionaries with `image`, `text`, `graph`, and `image_id`. `GraphCollator`
+turns these into stacked images, teacher-forcing token pairs, canonical matcher-format ground-truth
+graphs, and JSON-safe integer IDs. The Visual Genome loader keeps the standard background-inclusive
+VG IDs unchanged, assigns per-class instance IDs with the configured IoU threshold, and opens HDF5
+files lazily per DataLoader worker.
+
+Image preprocessing follows the configured encoder: ImageNet normalization at `resize_dim` for
+DINOv2, CLIP normalization at `clip_resize_dim` for CLIP, and unnormalized tensors for toy tests.
+Raw datasets belong under the repository-root `/data/`; the source package `patchsgg/data/` is not
+ignored by Git.
+
+Checkpoint paths are local-first. When a Talk2DINO weight or DeCap memory file is absent, set the
+matching `*_hf_repo_id` and optional `*_hf_filename` fields in the YAML config to download it through
+Hugging Face Hub. Leaving the repo ID null gives an immediate, actionable `FileNotFoundError`.

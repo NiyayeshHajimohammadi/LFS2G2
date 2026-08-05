@@ -17,9 +17,10 @@ import torch
 import torch.nn as nn
 
 from patchsgg.encoders.base import ConditioningSet
+from patchsgg.utils.huggingface import get_model_path_with_hf_fallback
 
 
-def _load_clip(cfg, device): 
+def _load_clip(cfg, device):
     import clip  # openai CLIP
 
     model, _ = clip.load(cfg.encoders.clip_model, device=device)
@@ -34,10 +35,10 @@ def _clip_token_hidden_states(clip_model, tokens: torch.Tensor) -> torch.Tensor:
 
     Mirrors ``CLIP.encode_text`` up to (but not including) the EOS pooling + projection.
     """
-    
-    x = clip_model.token_embedding(tokens).type(clip_model.dtype) 
+    #MY comment: manually extracts per-token CLIP text hidden states.
+    x = clip_model.token_embedding(tokens).type(clip_model.dtype)
     x = x + clip_model.positional_embedding.type(clip_model.dtype)
-    x = x.permute(1, 0, 2)
+    x = x.permute(1, 0, 2)#My comment: ->[L, B, D]
     x = clip_model.transformer(x)
     x = x.permute(1, 0, 2)
     x = clip_model.ln_final(x).type(clip_model.dtype)
@@ -92,7 +93,15 @@ class Talk2DinoTextEncoder(_BaseTextEncoder):
         from patchsgg.encoders.talk2dino import ProjectionLayer
 
         self.proj = ProjectionLayer.from_config(cfg.encoders.talk2dino_config)
-        sd = torch.load(cfg.encoders.talk2dino_weights, map_location="cpu")
+        weights_path = get_model_path_with_hf_fallback(
+            cfg.encoders.talk2dino_weights,
+            hf_repo_id=cfg.encoders.get("talk2dino_hf_repo_id", None),
+            filename=cfg.encoders.get("talk2dino_hf_filename", None),
+            cache_dir=cfg.encoders.get("hf_cache_dir", None),
+        )
+        sd = torch.load(weights_path, map_location="cpu")
+        if isinstance(sd, dict) and "state_dict" in sd:
+            sd = sd["state_dict"]
         self.proj.load_state_dict(sd)
         self.proj.eval().to(self.device)
         for p in self.proj.parameters():

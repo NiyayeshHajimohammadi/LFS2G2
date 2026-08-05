@@ -37,8 +37,22 @@ class SGGLightning(pl.LightningModule):
 
     @classmethod
     def from_checkpoint(cls, path: str, map_location="cpu") -> "SGGLightning":
+        """Load a checkpoint while overriding its stale construction device.
+
+        Lightning checkpoints often store ``device: cuda`` in the training config. Rebuilding that
+        config unchanged on a CPU inference host would try to construct frozen encoders on CUDA
+        before ``map_location`` can help. The runtime device therefore follows ``map_location``.
+        """
         ckpt = torch.load(path, map_location=map_location)
-        model = cls(ckpt["hyper_parameters"]["cfg"])
+        cfg_dict = dict(ckpt["hyper_parameters"]["cfg"])
+        if isinstance(map_location, (str, torch.device)):
+            runtime_device = str(map_location)
+            if runtime_device.startswith("cuda"):
+                runtime_device = "cuda"
+            elif runtime_device.startswith("cpu"):
+                runtime_device = "cpu"
+            cfg_dict["device"] = runtime_device
+        model = cls(cfg_dict)
         model.load_state_dict(ckpt["state_dict"])
         return model
 
@@ -75,7 +89,10 @@ class SGGDataModule(pl.LightningDataModule):
         super().__init__()
         self.cfg = cfg
         self.vocab = build_vocab(cfg)
-        self.collate = GraphCollator(vocab=self.vocab, seed=int(cfg.get("seed", 42)))
+        seed = int(cfg.get("seed", 42))
+        self.train_collate = GraphCollator(vocab=self.vocab, seed=seed, deterministic=False)
+        self.val_collate = GraphCollator(vocab=self.vocab, seed=seed + 1, deterministic=True)
+        self.collate = self.train_collate  # backwards-compatible attribute
 
     def setup(self, stage=None):
         self.train_ds = build_dataset(self.cfg, "train", self.vocab)
@@ -84,11 +101,11 @@ class SGGDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_ds, batch_size=int(self.cfg.train.batch_size), shuffle=True,
-            num_workers=int(self.cfg.get("num_workers", 0)), collate_fn=self.collate,
+            num_workers=int(self.cfg.get("num_workers", 0)), collate_fn=self.train_collate,
         )
 
     def val_dataloader(self):
         return DataLoader(
             self.val_ds, batch_size=int(self.cfg.eval.get("batch_size", self.cfg.train.batch_size)),
-            shuffle=False, num_workers=int(self.cfg.get("num_workers", 0)), collate_fn=self.collate,
+            shuffle=False, num_workers=int(self.cfg.get("num_workers", 0)), collate_fn=self.val_collate,
         )

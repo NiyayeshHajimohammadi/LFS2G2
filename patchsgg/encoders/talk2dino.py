@@ -20,7 +20,7 @@ class ProjectionLayer(nn.Module):
                  alignment_strategy="max_score", alpha=0.6, keep_cls=False, keep_end_seq=False):
         super().__init__()
         self.num_attn_head = num_attn_head
-        self.linear_layer = nn.Linear(clip_embed_dim, dino_embed_dim)#My comment: It creates a learned affine transformation
+        self.linear_layer = nn.Linear(clip_embed_dim, dino_embed_dim)
         if hidden_layer:
             hidden_layer = 1 if hidden_layer is True else hidden_layer
             self.hidden_layers = nn.ModuleList(
@@ -28,10 +28,10 @@ class ProjectionLayer(nn.Module):
             )
         self.act = act
         self.cosine = cosine
-        self.weight_attn_heads = weight_attn_heads#My comment: Controls how attention heads would be weighted in the original architecture.
-        if weight_attn_heads == "static":#My comment: In static mode, one learned scalar is created for each attention head.
+        self.weight_attn_heads = weight_attn_heads
+        if weight_attn_heads == "static":
             self.attn_weights = nn.Parameter(torch.rand(self.num_attn_head))
-        elif weight_attn_heads == "conditioned":#My comment: In conditioned mode, the attention-head weights would be generated dynamically from a DINO embedding.
+        elif weight_attn_heads == "conditioned":
             self.weight_layer1 = nn.Linear(dino_embed_dim, dino_embed_dim)
             self.weight_layer2 = nn.Linear(dino_embed_dim, self.num_attn_head)
         self.alignment_strategy = alignment_strategy
@@ -67,7 +67,6 @@ class ProjectionLayer(nn.Module):
         return model
 
     def project_clip_txt(self, textual_embedding):
-        #My comment: the primary method used in the project.
         textual_embedding = textual_embedding.float()
         x = self.linear_layer(textual_embedding)
         if hasattr(self, "hidden_layers"):
@@ -81,7 +80,7 @@ class ProjectionLayer(nn.Module):
         if "linear_layer2.weight" in state_dict:  # old-checkpoint compatibility
             state_dict["hidden_layers.0.weight"] = state_dict.pop("linear_layer2.weight")
             state_dict["hidden_layers.0.bias"] = state_dict.pop("linear_layer2.bias")
-        super().load_state_dict(state_dict, strict)
+        return super().load_state_dict(state_dict, strict)
 #My comment:
 # Several attributes are unused in your actual path
 # load_state_dict() should return the superclass result

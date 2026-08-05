@@ -19,6 +19,8 @@ dependencies = [
     "tqdm",
     "pyyaml",
     "einops",
+    "pillow",
+    "huggingface_hub>=0.20",
 ]
 
 [project.optional-dependencies]

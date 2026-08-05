@@ -7,6 +7,8 @@ h5py
 tqdm
 pyyaml
 einops
+pillow
+huggingface_hub>=0.20
 
 # Encoders (installed on the Linux training box)
 ftfy

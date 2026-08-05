@@ -18,11 +18,15 @@ encoders:
   dino_embed_dim: 768
   talk2dino_config: checkpoints/talk2dino/vitb_mlp_infonce.yaml
   talk2dino_weights: checkpoints/talk2dino/vitb.pth
+  talk2dino_hf_repo_id: null
+  talk2dino_hf_filename: null
+  hf_cache_dir: null
   talk2dino_attn_type: qkv
   text_token_mode: clip_tokens     # pooled | clip_tokens
   image_token_mode: patch          # pooled | patch
   max_text_tokens: 32
-  resize_dim: 518
+  resize_dim: 518              # DINO center-crop size
+  clip_resize_dim: 224         # CLIP center-crop size
   # toy-only knobs:
   dim: 256
   toy_text_tokens: 1
@@ -34,6 +38,8 @@ bridge:
   noise_std: 0.08
   projection_temperature: 0.01
   memory_path: checkpoints/decap_memory.pt   # [M, D] text-embedding bank (build offline)
+  memory_hf_repo_id: null
+  memory_hf_filename: null
   project_tokens: true
 
 decoder:
@@ -63,6 +69,8 @@ data:
     image_meta: data/vg/image_data.json
     image_dir: data/vg/images
     instance_iou: 0.5
+    num_val_images: 5000
+    filter_duplicate_rels: false
     num_images: -1
 
 train:

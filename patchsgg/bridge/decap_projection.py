@@ -24,7 +24,13 @@ class DecapProjectionBridge(Bridge):
 
     def _lazy_projector(self) -> DecapMemoryProjector:
         if self._projector is None:
-            self._projector = DecapMemoryProjector(self.memory_path, device=self.cfg.device)
+            self._projector = DecapMemoryProjector(
+                self.memory_path,
+                device=self.cfg.device,
+                hf_repo_id=self.cfg.bridge.get("memory_hf_repo_id", None),
+                hf_filename=self.cfg.bridge.get("memory_hf_filename", None),
+                cache_dir=self.cfg.encoders.get("hf_cache_dir", None),
+            )
         return self._projector
 
     @torch.no_grad()
