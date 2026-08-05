@@ -43,7 +43,7 @@ _SEQ_ROLE = [
     TokenType.PREDICATE, # 4 predicate
 ]
 
-TOKENS_PER_REL = 5
+TOKENS_PER_REL = 5 #Every complete relationship occupies exactly five tokens.
 
 
 @dataclass(frozen=True)

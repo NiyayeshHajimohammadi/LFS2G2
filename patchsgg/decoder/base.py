@@ -44,15 +44,17 @@ class GraphDecoder(nn.Module):
     def forward(self, cond: ConditioningSet, input_tokens: torch.Tensor) -> torch.Tensor:
         """Teacher-forced logits ``[B, T, V]`` aligned to the target sequence."""
         return self.logits(cond, input_tokens)
-        #My comment: teacher-forcing shift itself. That shift is created by build_train_pair() in graph_seq/linearize.py.
+        #My comment: teacher-forcing shift itself is created by build_train_pair() in graph_seq/linearize.py.
 
     @torch.no_grad()
     def generate(self, cond: ConditioningSet, gen_cfg: GenConfig):
+        #My comment: it basically generates what to feed the decoder in the next step
         B = cond.batch_size
         start = torch.full((B, 1), self.vocab.start_token, dtype=torch.long, device=cond.tokens.device)
 
         def step_fn(tokens: torch.Tensor) -> torch.Tensor:
             return self.logits(cond, tokens)[:, -1]
+            #My comment: constrained_generate expects a function that maps the current prefix to next-token logits
 
         return constrained_generate(step_fn, start, self.vocab, gen_cfg)
 
@@ -66,6 +68,7 @@ def build_decoder(cfg, vocab: GraphVocab, cond_dim: int) -> GraphDecoder:
     # positional table must cover both teacher-forced training length (max_num_rels) and the
     # autoregressive generation length (eval.max_rels), whichever is larger.
     max_rels = max(vocab.max_num_rels, int(cfg.eval.get("max_rels", 100)))
+    #My comment: Prepare the shared arguments
     common = dict(
         vocab=vocab,
         cond_dim=cond_dim,

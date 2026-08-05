@@ -8,7 +8,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from patchsgg.decoder.base import GraphDecoder
+from patchsgg.decoder.base import GraphDecoder #My comment: It provides all shared decoder functionality
 from patchsgg.encoders.base import ConditioningSet
 
 

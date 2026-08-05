@@ -26,7 +26,7 @@ except Exception:  # pragma: no cover
     _HAS_SCIPY = False
 
 
-def _assign(cost: torch.Tensor) -> torch.Tensor:
+def _assign(cost: torch.Tensor) -> torch.Tensor: #My comment: This helper accepts a cost matrix. shaped [n,n] Rows-> predicted relation positions and Columns-> ground-truth relations.
     """Return ``order`` s.t. predicted block ``i`` is matched to GT block ``order[i]``.
 
     ``cost``: [n, n] (rows = predicted blocks, cols = GT blocks), lower is better.

@@ -5,6 +5,7 @@ that position are considered (entity / instance / predicate). Entities are sampl
 temperature + nucleus (top-p); instances and predicates are greedy. END is only permitted at a
 tuple boundary (start of a new subject), giving a natural stopping point.
 """
+#My comment: This module is used only during inference and validation, not during teacher-forced training.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,16 +17,16 @@ from patchsgg.graph_seq.vocab import TOKENS_PER_REL, GraphVocab, TokenType
 
 
 @dataclass
-class GenConfig:
+class GenConfig: #My comment: This class contains inference-time generation settings.
     max_rels: int = 100
-    temperature: float = 1.75
+    temperature: float = 1.75 #My comment:Temperature modifies the sharpness of the distribution before stochastic entity sampling
     top_p: float = 0.95
     top_k: int = 0
     entity_sampling: str = "stochastic"  # 'stochastic' | 'greedy'
     allow_end: bool = True
 
 
-def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0) -> torch.Tensor:
+def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0) -> torch.Tensor:#My comment: This function removes unlikely tokens before stochastic sampling.
     """Mask logits outside the top-k / top-p (nucleus) set with -inf. ``logits``: [B, V]."""
     logits = logits.clone()
     if top_k > 0:
@@ -39,10 +40,11 @@ def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0)
         remove[:, 0] = False
         scatter_remove = remove.scatter(1, sorted_idx, remove)
         logits[scatter_remove] = float("-inf")
+        #My comment: It does not return probabilities. It returns another logit tensor in which rejected candidates have value -inf
     return logits
 
 
-def _select_range(logits: torch.Tensor, lo: int, hi: int) -> torch.Tensor:
+def _select_range(logits: torch.Tensor, lo: int, hi: int) -> torch.Tensor:#My comment: takes the decoder’s scores for every token in the vocabulary and keeps only the tokens that are valid for the current position.
     """Return a full-vocab logit tensor with everything outside [lo, hi) masked to -inf."""
     masked = torch.full_like(logits, float("-inf"))
     masked[:, lo:hi] = logits[:, lo:hi]
@@ -51,8 +53,8 @@ def _select_range(logits: torch.Tensor, lo: int, hi: int) -> torch.Tensor:
 
 @torch.no_grad()
 def constrained_generate(
-    step_fn: Callable[[torch.Tensor], torch.Tensor],
-    start_tokens: torch.Tensor,
+    step_fn: Callable[[torch.Tensor], torch.Tensor], #My comment: A callback that accepts the sequence generated so far [B,T] and returns logits for the next token [B,V]
+    start_tokens: torch.Tensor, #My comment: shape [B,1]
     vocab: GraphVocab,
     cfg: GenConfig,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -70,16 +72,16 @@ def constrained_generate(
     total_steps = cfg.max_rels * TOKENS_PER_REL
 
     for i in range(total_steps):
-        role = vocab.role_at(i)
+        role = vocab.role_at(i) #My comment: Determines which token category is valid at this position.
         logits = step_fn(seq)  # [B, V]
         lo, hi = vocab.range_for_role(role)
         masked = _select_range(logits, lo, hi)
 
-        at_tuple_start = (i % TOKENS_PER_REL) == 0
+        at_tuple_start = (i % TOKENS_PER_REL) == 0 #My comment: Checks whether the model is about to start another relation.
         if cfg.allow_end and at_tuple_start:
-            masked[:, vocab.end_token] = logits[:, vocab.end_token]
+            masked[:, vocab.end_token] = logits[:, vocab.end_token] #My comment: restores the decoder’s original END logit
 
-        if role is TokenType.ENTITY and cfg.entity_sampling == "stochastic":
+        if role is TokenType.ENTITY and cfg.entity_sampling == "stochastic": #My comment: Stochastic decoding is used only for entity-class positions.
             scaled = masked / cfg.temperature
             scaled = top_k_top_p_filter(scaled, top_k=cfg.top_k, top_p=cfg.top_p)
             probs = torch.softmax(scaled, dim=-1)
@@ -99,3 +101,4 @@ def constrained_generate(
             break
 
     return torch.cat(out_tokens, dim=1), torch.cat(out_scores, dim=1)
+#My comment: used after training to generate predictions

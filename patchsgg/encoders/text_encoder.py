@@ -19,7 +19,7 @@ import torch.nn as nn
 from patchsgg.encoders.base import ConditioningSet
 
 
-def _load_clip(cfg, device):
+def _load_clip(cfg, device): 
     import clip  # openai CLIP
 
     model, _ = clip.load(cfg.encoders.clip_model, device=device)
@@ -34,10 +34,10 @@ def _clip_token_hidden_states(clip_model, tokens: torch.Tensor) -> torch.Tensor:
 
     Mirrors ``CLIP.encode_text`` up to (but not including) the EOS pooling + projection.
     """
-    #MY comment: manually extracts per-token CLIP text hidden states.
-    x = clip_model.token_embedding(tokens).type(clip_model.dtype)
+    
+    x = clip_model.token_embedding(tokens).type(clip_model.dtype) 
     x = x + clip_model.positional_embedding.type(clip_model.dtype)
-    x = x.permute(1, 0, 2)#My comment: ->[L, B, D]
+    x = x.permute(1, 0, 2)
     x = clip_model.transformer(x)
     x = x.permute(1, 0, 2)
     x = clip_model.ln_final(x).type(clip_model.dtype)
