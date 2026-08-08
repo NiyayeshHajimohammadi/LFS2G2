@@ -116,10 +116,12 @@ data:
   captions_cache: null
 
   vg:
-    roidb_file: data/vg/VG-SGG.h5
-    dict_file: data/vg/VG-SGG-dicts.json
-    image_meta: data/vg/image_data.json
-    image_dir: data/vg/images
+    roidb_file: /datasets/niyayesh/LFS2G2_VG/VG-SGG.h5
+    dict_file: /datasets/niyayesh/LFS2G2_VG/VG-SGG-dicts.json
+    image_meta: /datasets/niyayesh/LFS2G2_VG/image_data.json
+
+    # Root containing VG_100K/ and VG_100K_2/
+    image_dir: /datasets/niyayesh/LFS2G2_VG
 
     instance_iou: 0.5
     num_val_images: 5000
@@ -139,7 +141,7 @@ data:
 train:
   train_modality: image
 
-  batch_size: 2
+  batch_size: 16
   accumulate_grad_batches: 8
 
   lr: 4.0e-5
@@ -163,7 +165,7 @@ eval:
   batch_size: 1
   ks: [20, 50, 100]
 
-  max_rels: 55
+  max_rels: 20
   temperature: 1.75
   top_p: 0.95
   top_k: 0

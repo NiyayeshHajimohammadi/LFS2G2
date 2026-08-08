@@ -22,6 +22,7 @@ from patchsgg.data.graph_text_views import select_text_view, serialize_graph
 from patchsgg.data.transforms import build_image_transform
 from patchsgg.graph_seq.linearize import Graph, Relation
 from patchsgg.graph_seq.vocab import GraphVocab
+from urllib.parse import urlparse
 
 
 _CORRUPTED_IMAGE_IDS = {1592, 1722, 4616, 4617}
@@ -183,16 +184,64 @@ class VGGraphDataset(Dataset):
         return self._roi_handle
 
     def _image_path(self, img_idx: int) -> str:
+        """Resolve a Visual Genome image from VG_100K or VG_100K_2."""
+
         meta = self.image_meta[img_idx]
         image_id = int(meta["image_id"])
-        candidates = [
-            Path(self.image_dir) / f"{image_id}.jpg",
-            Path(self.image_dir) / str(meta.get("file_name", "")),
-        ]
-        for path in candidates:
-            if path.name and path.is_file():
-                return str(path)
-        raise FileNotFoundError(f"image {image_id} not found under {self.image_dir}")
+        root = Path(self.image_dir)
+
+        # Standard image_data.json includes the original folder in `url`.
+        url = str(meta.get("url", "")).strip()
+        url_path = Path(urlparse(url).path) if url else None
+
+        filenames: list[str] = []
+
+        if url_path is not None and url_path.name:
+            filenames.append(url_path.name)
+
+        file_name = str(meta.get("file_name", "")).strip()
+        if file_name:
+            name = Path(file_name).name
+            if name not in filenames:
+                filenames.append(name)
+
+        default_name = f"{image_id}.jpg"
+        if default_name not in filenames:
+            filenames.append(default_name)
+
+        directories: list[Path] = []
+
+        # Prefer the folder explicitly recorded by image_data.json.
+        if url_path is not None:
+            folder_hint = url_path.parent.name
+            if folder_hint in {"VG_100K", "VG_100K_2"}:
+                directories.append(root / folder_hint)
+
+        # Fallbacks.
+        directories.extend(
+            [
+                root / "VG_100K",
+                root / "VG_100K_2",
+                root,
+            ]
+        )
+
+        # Remove duplicate directories while preserving order.
+        unique_dirs: list[Path] = []
+        for directory in directories:
+            if directory not in unique_dirs:
+                unique_dirs.append(directory)
+
+        for directory in unique_dirs:
+            for filename in filenames:
+                candidate = directory / filename
+                if candidate.is_file():
+                    return str(candidate)
+
+        searched = ", ".join(str(directory) for directory in unique_dirs)
+        raise FileNotFoundError(
+            f"image {image_id} not found; searched: {searched}"
+        )
 
     def _graph_for(self, roi: h5py.File, img_idx: int) -> Graph:
         first_box = int(roi["img_to_first_box"][img_idx])
