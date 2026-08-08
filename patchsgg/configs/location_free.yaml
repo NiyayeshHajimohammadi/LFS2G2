@@ -15,12 +15,19 @@
 
 seed: 4
 device: cuda
-output_dir: outputs/location_free_pix2sg_vg
+
+# Separate directory for the real long-running experiment.
+# Do not mix it with the 1-epoch smoke-test checkpoints.
+output_dir: outputs/location_free_pix2sg_vg_full
+
 num_workers: 10
 
-# Exact Visual Genome token layout used by LF-SGG/Pix2SG.
-# Training sequences contain at most 55 relation quintuples. This is separate
-# from eval.max_rels, which controls how many relations are generated.
+# =============================================================================
+# Graph vocabulary
+# =============================================================================
+# Training sequences contain at most 55 relation quintuples.
+# This is separate from eval.max_rels, which controls how many relations
+# can be generated during autoregressive evaluation.
 vocab:
   n_preds: 51
   n_entities: 151
@@ -28,89 +35,95 @@ vocab:
   random_max_instance_id: 10
   max_num_rels: 55
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Image encoder
-# -----------------------------------------------------------------------------
-# The original paper's released ViT-B model uses a contrastively pretrained
-# EVA ViT at 448 px. This repository does not implement EVA, so CLIP ViT-B/16
-# patch tokens are the closest directly supported image-only substitute.
+# =============================================================================
+# The original LF-SGG/Pix2SG setup uses a different ViT implementation.
+# This repository uses CLIP ViT-B/16 as the supported image encoder.
 encoders:
   space: clip
   clip_model: ViT-B/16
+
   image_token_mode: patch
   text_token_mode: pooled
   max_text_tokens: 32
 
-  # This experiment is image-conditioned for both training and evaluation, so
-  # avoid loading an unused second CLIP model for the text encoder.
+  # Training and evaluation are both image-conditioned.
+  # Do not build an unused text encoder.
   build_only_required: true
 
   resize_dim: 224
   clip_resize_dim: 224
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Conditioning bridge
-# -----------------------------------------------------------------------------
-# Image features condition the decoder during both training and evaluation, so
-# there is no text-image modality gap to correct.
+# =============================================================================
+# Train and evaluation both use image features, so there is no train/test
+# text-image modality gap that needs CapDec/DeCap correction.
 bridge:
-  type: identity                 # identity | capdec_noise | decap_projection
+  type: identity
+
+  # Unused for identity bridge, retained because they are supported config keys.
   types: null
-  noise_std: 0.08                # unused by identity
-  projection_temperature: 0.01   # unused by identity
+  noise_std: 0.08
+  projection_temperature: 0.01
   memory_path: checkpoints/decap_memory.pt
   project_tokens: true
 
-# -----------------------------------------------------------------------------
-# Hugging Face GPT-2 graph decoder
-# -----------------------------------------------------------------------------
-# The graph still uses PatchSGG's 245-token structured vocabulary. GPT-2's
-# English BPE tokenizer is NOT used. We reuse GPT-2's pretrained causal
-# transformer blocks and native positional embeddings, while learning:
-#   - graph-token embeddings
-#   - the visual-conditioning projection
-#   - newly added cross-attention layers
-#   - the graph-vocabulary output head
+# =============================================================================
+# GPT-2 graph decoder
+# =============================================================================
+# GPT-2's language tokenizer is NOT used.
+# The transformer operates on PatchSGG's structured graph-token vocabulary.
 #
-# Standard GPT-2 supports 1,024 positions, while 300 relations need 1,501
-# positions including START. extend_positions copies the pretrained first 1,024
-# position embeddings and initializes only the additional positions.
+# 300 relations require:
+#
+#   START + (300 relations * 5 tokens) = 1501 positions
+#
+# GPT-2 normally supports 1024 positions, so the position table is extended.
 decoder:
   type: gpt2_cross_attn
   model_name: openai-community/gpt2
   revision: main
+
   cache_dir: null
   local_files_only: false
 
+  # Fine-tune GPT-2 rather than freezing it.
   freeze_pretrained: false
+
+  # Saves GPU memory for this relatively long decoder.
   gradient_checkpointing: true
+
   tie_graph_embeddings: true
 
-  # START + 300 × 5 tokens
   max_seq_len: 1501
   extend_positions: true
+
   dropout: 0.1
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Training objective
-# -----------------------------------------------------------------------------
-# Pix2SG uses categorical cross-entropy over the entire vocabulary. Its released
-# VG implementation downweights END and NOISE tokens even when predicate-frequency
-# weighting is disabled. In this project, ce_weighted with freq_path: null
-# reproduces that END/NOISE treatment.
+# =============================================================================
+# Weighted CE with freq_path=null keeps the project's END/NOISE weighting
+# without applying predicate-frequency weighting.
 loss:
-  type: ce_weighted              # ce | ce_weighted | matching_ce | order_agnostic
-  label_smoothing: 0.0
-  freq_path: null                # keep null for paper-style END/NOISE weighting only
-  weighted: false                # relevant only to matching_ce
-  matcher_n: 3                   # relevant only to matching_ce
-  matcher_depth: 10              # relevant only to matching_ce
+  type: ce_weighted
 
-# -----------------------------------------------------------------------------
-# Visual Genome data
-# -----------------------------------------------------------------------------
+  label_smoothing: 0.0
+  freq_path: null
+
+  # These options matter only for matching_ce, but are retained explicitly.
+  weighted: false
+  matcher_n: 3
+  matcher_depth: 10
+
+# =============================================================================
+# Visual Genome
+# =============================================================================
 data:
   dataset: vg
+
   text_view: serialize
   serialize_with_instances: false
   captions_cache: null
@@ -120,58 +133,98 @@ data:
     dict_file: /datasets/niyayesh/LFS2G2_VG/VG-SGG-dicts.json
     image_meta: /datasets/niyayesh/LFS2G2_VG/image_data.json
 
-    # Root containing VG_100K/ and VG_100K_2/
+    # Root containing:
+    #   VG_100K/
+    #   VG_100K_2/
     image_dir: /datasets/niyayesh/LFS2G2_VG
 
     instance_iou: 0.5
+
+    # Standard validation subset used by this pipeline.
     num_val_images: 5000
+
+    # Use the complete available dataset.
     num_images: -1
+
     filter_empty_rels: true
+
+    # Keep false because the current PatchSGG loader's duplicate-relation
+    # handling is not identical to the original LF-SGG implementation.
     filter_duplicate_rels: false
+
     image_resize_mode: center_crop
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Optimization
-# -----------------------------------------------------------------------------
-# Paper: AdamW, constant lr 4e-5, weight decay 1e-4, batch size 16,
-# gradient clipping 0.1, up to 200 epochs with early stopping.
+# =============================================================================
+# Long-running LF-SGG-style experiment:
 #
-# Early stopping monitors validation R@20. Patience counts validation checks,
-# not individual epochs.
+#   optimizer: AdamW
+#   learning rate: 4e-5
+#   weight decay: 1e-4
+#   effective batch size: 16
+#   gradient clipping: 0.1
+#   maximum epochs: 200
+#
+# Physical batch 4 * gradient accumulation 4 = effective batch 16.
 train:
   train_modality: image
 
-  batch_size: 16
-  accumulate_grad_batches: 8
+  batch_size: 4
+  accumulate_grad_batches: 4
 
   lr: 4.0e-5
   weight_decay: 1.0e-4
-  max_epochs: 200
-  eval_every_epochs: 5
-  log_every_steps: 50
-  grad_clip: 0.1
 
+  max_epochs: 200
+
+  # Full validation every 5 epochs.
+  # Do NOT validate every epoch: autoregressive 300-relation generation
+  # is expensive.
+  eval_every_epochs: 5
+
+  log_every_steps: 50
+
+  grad_clip: 0.1
   precision: 16-mixed
+
+  # Patience is counted in validation checks.
+  # With validation every 5 epochs, patience 10 means training can tolerate
+  # approximately 50 epochs without an improvement in val/R@20.
   early_stopping_patience: 10
 
-# -----------------------------------------------------------------------------
-# Location-free inference and evaluation
-# -----------------------------------------------------------------------------
-# Paper: generate 300 relations; nucleus-sample entity classes with temperature
-# 1.75 and top-p 0.95; greedily choose instance and predicate tokens; evaluate
-# R@20/R@50/R@100 with heuristic matcher branching factor B=3.
+# =============================================================================
+# Location-free inference / validation
+# =============================================================================
+# Full LF-SGG-style generation:
+#
+#   - generate up to 300 relations
+#   - sample entity classes using temperature 1.75 and top-p 0.95
+#   - greedy selection for the remaining structured token types
+#   - evaluate R@20 / R@50 / R@100
+#   - use branched instance matching with B=3
 eval:
   eval_modality: image
+
   batch_size: 1
+
   ks: [20, 50, 100]
 
-  max_rels: 20
+  # Full evaluation generation length.
+  max_rels: 300
+
   temperature: 1.75
   top_p: 0.95
   top_k: 0
+
   entity_sampling: stochastic
+
+  # Generate the configured number of relation slots rather than stopping
+  # early on END.
   allow_end: false
 
   matcher_n: 3
   matcher_depth: 10
+
+  # Real image->graph evaluation requires the compiled branched matcher.
   matcher_identity_fallback: false

@@ -39,16 +39,42 @@ def main(argv: List[str] | None = None):
     model = SGGLightning(cfg)
 
     output_dir = cfg.get("output_dir", "outputs")
-    checkpoint_callback = ModelCheckpoint(
+
+    # -------------------------------------------------------------------------
+    # 1) BEST checkpoint
+    # -------------------------------------------------------------------------
+    # Only evaluated when validation runs.
+    # Keeps the single checkpoint with the highest validation R@20.
+    best_checkpoint_callback = ModelCheckpoint(
         dirpath=output_dir,
-        save_last=True,
-        save_top_k=1,
         monitor="val/R@20",
         mode="max",
+        save_top_k=1,
+        save_last=False,
         filename="best-{epoch}",
+        save_on_train_epoch_end=False,
     )
 
-    callbacks = [checkpoint_callback]
+    # -------------------------------------------------------------------------
+    # 2) RECOVERY checkpoint
+    # -------------------------------------------------------------------------
+    # Saved at the end of EVERY training epoch, independently of validation.
+    # The filename is always last.ckpt, so the previous recovery checkpoint
+    # is overwritten rather than keeping hundreds of epoch checkpoints.
+    last_checkpoint_callback = ModelCheckpoint(
+        dirpath=output_dir,
+        monitor=None,
+        save_top_k=1,
+        every_n_epochs=1,
+        save_on_train_epoch_end=True,
+        filename="last",
+        enable_version_counter=False,
+    )
+
+    callbacks = [
+        best_checkpoint_callback,
+        last_checkpoint_callback,
+    ]
     patience = int(cfg.train.get("early_stopping_patience", 0))
     if patience > 0:
         callbacks.append(
@@ -79,8 +105,8 @@ def main(argv: List[str] | None = None):
 
     print(
         "done. "
-        f"best={checkpoint_callback.best_model_path or '(n/a)'}  "
-        f"last={checkpoint_callback.last_model_path}"
+        f"best={best_checkpoint_callback.best_model_path or '(n/a)'}  "
+        f"last={last_checkpoint_callback.best_model_path or '(n/a)'}"
     )
 
 
