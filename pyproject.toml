@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Heavy / environment-specific deps for the real encoders (Linux training box).
+
 encoders = [
     "ftfy",
     "regex",
@@ -33,6 +34,11 @@ encoders = [
     "open_clip_torch",
     "clip @ git+https://github.com/openai/CLIP.git",
 ]
+
+lora = [
+    "peft",
+]
+
 llm = ["anthropic"]
 dev = ["pytest", "ruff", "scipy"]
 

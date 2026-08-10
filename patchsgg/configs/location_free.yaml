@@ -85,21 +85,26 @@ decoder:
   type: gpt2_cross_attn
   model_name: openai-community/gpt2
   revision: main
-
   cache_dir: null
   local_files_only: false
 
-  # Fine-tune GPT-2 rather than freezing it.
   freeze_pretrained: false
 
-  # Saves GPU memory for this relatively long decoder.
-  gradient_checkpointing: true
+  # -----------------------------------------------------------
+  # Optional LoRA adaptation
+  # -----------------------------------------------------------
+  lora:
+    enabled: false
+    r: 8
+    alpha: 16
+    dropout: 0.05
+    bias: none
 
+  gradient_checkpointing: true
   tie_graph_embeddings: true
 
   max_seq_len: 1501
   extend_positions: true
-
   dropout: 0.1
 
 # =============================================================================

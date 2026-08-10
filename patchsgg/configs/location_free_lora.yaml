@@ -1,0 +1,458 @@
+# =============================================================================
+# Location-Free Scene Graph Generation (Pix2SG-style) on Visual Genome
+# GPT-2 + LoRA
+# =============================================================================
+# Fully supervised and location-free:
+#   train: image -> graph sequence
+#   eval:  image -> graph sequence
+#
+# This configuration is the LoRA version of location_free.yaml.
+#
+# GPT-2's pretrained parameters are frozen and adapted using LoRA.
+# The newly initialized task-specific parts remain fully trainable:
+#   - visual-conditioning projection
+#   - newly added GPT-2 cross-attention layers
+#   - cross-attention layer norms
+#   - graph-token embeddings
+#   - graph-vocabulary output head
+#
+# LoRA is applied only to GPT-2's PRETRAINED causal self-attention
+# projections. It is NOT applied to the newly initialized cross-attention
+# or the MLP layers in the initial experiment.
+#
+# This file is standalone; it does not inherit from location_free.yaml
+# or base.yaml.
+# =============================================================================
+
+seed: 4
+device: cuda
+output_dir: outputs/location_free_pix2sg_vg_lora
+num_workers: 10
+
+
+# =============================================================================
+# Scene-graph vocabulary
+# =============================================================================
+# Exact Visual Genome token layout used by LF-SGG/Pix2SG.
+#
+# Each relation is represented as:
+#
+#   [subject_class,
+#    subject_instance,
+#    predicate,
+#    object_class,
+#    object_instance]
+#
+# Training sequences contain at most 55 relation quintuples.
+# This is separate from eval.max_rels, which controls how many relations
+# are generated during evaluation.
+# =============================================================================
+
+vocab:
+  n_preds: 51
+  n_entities: 151
+
+  max_instance_id: 30
+  random_max_instance_id: 10
+
+  max_num_rels: 55
+
+
+# =============================================================================
+# Image encoder
+# =============================================================================
+# The original paper's released ViT-B model uses a contrastively pretrained
+# EVA ViT at 448 px.
+#
+# This repository does not currently implement EVA, so CLIP ViT-B/16
+# patch tokens are used as the closest directly supported image-only
+# substitute.
+#
+# The encoder remains frozen during training.
+# =============================================================================
+
+encoders:
+  space: clip
+
+  clip_model: ViT-B/16
+
+  # Use individual CLIP patch tokens as conditioning memory for GPT-2
+  # cross-attention.
+  image_token_mode: patch
+
+  text_token_mode: pooled
+  max_text_tokens: 32
+
+  # This experiment is image-conditioned during both training and
+  # evaluation, so do not load an unused text encoder.
+  build_only_required: true
+
+  resize_dim: 224
+  clip_resize_dim: 224
+
+
+# =============================================================================
+# Conditioning bridge
+# =============================================================================
+# Image features condition the decoder during both training and evaluation.
+#
+# There is therefore no train-time text -> inference-time image modality gap
+# in this experiment, so no CapDec/DeCap modality-gap correction is needed.
+# =============================================================================
+
+bridge:
+  type: identity                 # identity | capdec_noise | decap_projection
+  types: null
+
+  # Unused when type = identity.
+  noise_std: 0.08
+
+  # Unused when type = identity.
+  projection_temperature: 0.01
+
+  # Unused when type = identity.
+  memory_path: checkpoints/decap_memory.pt
+
+  project_tokens: true
+
+
+# =============================================================================
+# Hugging Face GPT-2 graph decoder
+# =============================================================================
+#
+# IMPORTANT:
+#
+# GPT-2's English BPE tokenizer and vocabulary are NOT used.
+#
+# PatchSGG keeps its own structured scene-graph vocabulary and learns its
+# own graph-token embedding/output layers.
+#
+# We reuse GPT-2's:
+#
+#   - pretrained transformer blocks
+#   - pretrained causal self-attention
+#   - pretrained MLP layers
+#   - pretrained layer norms
+#   - pretrained positional embeddings
+#
+# and add:
+#
+#   - graph-token embeddings
+#   - image-conditioning projection
+#   - cross-attention layers
+#   - graph-vocabulary output head
+#
+#
+# ---------------------------------------------------------------------------
+# LoRA strategy
+# ---------------------------------------------------------------------------
+#
+# With:
+#
+#     lora.enabled: true
+#
+# pretrained GPT-2 parameters are frozen.
+#
+# LoRA adapters are added to the pretrained GPT-2 SELF-ATTENTION
+# projections:
+#
+#     h.*.attn.c_attn
+#     h.*.attn.c_proj
+#
+# The following are NOT LoRA-adapted:
+#
+#     h.*.crossattention.*
+#     h.*.mlp.*
+#
+# Newly added cross-attention remains FULLY TRAINABLE because it was not
+# present in the original pretrained GPT-2 checkpoint and must learn how
+# to condition graph generation on visual features.
+#
+#
+# ---------------------------------------------------------------------------
+# Trainability in this configuration
+# ---------------------------------------------------------------------------
+#
+# CLIP encoder:
+#     FROZEN
+#
+# Original GPT-2:
+#     FROZEN
+#
+# GPT-2 LoRA matrices:
+#     TRAINABLE
+#
+# New GPT-2 cross-attention:
+#     TRAINABLE
+#
+# Cross-attention LayerNorm:
+#     TRAINABLE
+#
+# Visual conditioning projection:
+#     TRAINABLE
+#
+# Graph token embeddings:
+#     TRAINABLE
+#
+# Graph output head:
+#     TRAINABLE
+#
+# =============================================================================
+
+decoder:
+  type: gpt2_cross_attn
+
+  model_name: openai-community/gpt2
+  revision: main
+
+  cache_dir: null
+  local_files_only: false
+
+
+  # ---------------------------------------------------------------------------
+  # GPT-2 training strategy
+  # ---------------------------------------------------------------------------
+  #
+  # This value is kept false because LoRA itself freezes the pretrained GPT-2
+  # backbone.
+  #
+  # The decoder implementation should use:
+  #
+  #   if lora_enabled:
+  #       apply LoRA
+  #   elif freeze_pretrained:
+  #       freeze GPT-2
+  #
+  # Therefore the three supported modes are:
+  #
+  # FULL FINE-TUNING:
+  #   freeze_pretrained: false
+  #   lora.enabled: false
+  #
+  # FROZEN GPT-2:
+  #   freeze_pretrained: true
+  #   lora.enabled: false
+  #
+  # LoRA:
+  #   freeze_pretrained: false
+  #   lora.enabled: true
+  #
+  freeze_pretrained: false
+
+
+  # ---------------------------------------------------------------------------
+  # Optional LoRA adaptation
+  # ---------------------------------------------------------------------------
+  lora:
+
+    # Enable parameter-efficient adaptation of pretrained GPT-2.
+    enabled: true
+
+    # Rank of the low-rank LoRA matrices.
+    #
+    # r=8 is a good conservative starting point for GPT-2 small.
+    r: 8
+
+    # LoRA scaling coefficient.
+    #
+    # Effective LoRA scaling is controlled by alpha relative to r.
+    alpha: 16
+
+    # Dropout applied to the LoRA branch.
+    dropout: 0.05
+
+    # Do not make GPT-2 bias parameters trainable through LoRA.
+    bias: none
+
+
+  # Use activation checkpointing to reduce activation memory usage.
+  gradient_checkpointing: true
+
+
+  # Share graph-token input embeddings with the graph-vocabulary output head.
+  tie_graph_embeddings: true
+
+
+  # ---------------------------------------------------------------------------
+  # Sequence length
+  # ---------------------------------------------------------------------------
+  #
+  # Standard GPT-2 supports only 1,024 positions.
+  #
+  # The decoder can support:
+  #
+  #   START + 300 relations * 5 tokens = 1501 tokens
+  #
+  # extend_positions copies GPT-2's pretrained first 1,024 positional
+  # embeddings and initializes only the additional positions.
+  #
+  max_seq_len: 1501
+  extend_positions: true
+
+
+  # GPT-2 dropout.
+  dropout: 0.1
+
+
+# =============================================================================
+# Training objective
+# =============================================================================
+#
+# Pix2SG uses categorical cross-entropy over the complete structured
+# vocabulary.
+#
+# The released VG implementation downweights END and NOISE tokens even
+# when predicate-frequency weighting is disabled.
+#
+# In this project:
+#
+#     ce_weighted + freq_path: null
+#
+# preserves that END/NOISE treatment without predicate-frequency weighting.
+# =============================================================================
+
+loss:
+  type: ce_weighted              # ce | ce_weighted | matching_ce | order_agnostic
+
+  label_smoothing: 0.0
+
+  # null means:
+  # do not use predicate-frequency weights.
+  freq_path: null
+
+  # Relevant only for matching_ce.
+  weighted: false
+
+  # Relevant only for matching_ce.
+  matcher_n: 3
+  matcher_depth: 10
+
+
+# =============================================================================
+# Visual Genome dataset
+# =============================================================================
+
+data:
+  dataset: vg
+
+  text_view: serialize
+  serialize_with_instances: false
+
+  captions_cache: null
+
+  vg:
+    roidb_file: data/vg/VG-SGG.h5
+    dict_file: data/vg/VG-SGG-dicts.json
+    image_meta: data/vg/image_data.json
+    image_dir: data/vg/images
+
+    instance_iou: 0.5
+
+    # Number of images reserved for validation.
+    num_val_images: 5000
+
+    # -1 = use all available images.
+    num_images: -1
+
+    filter_empty_rels: true
+
+    # Keep duplicate relations, matching the current LF-SGG experiment.
+    filter_duplicate_rels: false
+
+    image_resize_mode: center_crop
+
+
+# =============================================================================
+# Optimization
+# =============================================================================
+#
+# Keep the optimization settings identical to location_free.yaml for the
+# first LoRA experiment.
+#
+# This is deliberate:
+#
+#     full fine-tuning vs LoRA
+#
+# should initially differ only in the adaptation strategy.
+#
+# After establishing that LoRA works correctly, batch size and learning rate
+# can be tuned independently.
+#
+# Current effective batch size:
+#
+#     batch_size 2 * accumulate_grad_batches 8 = 16
+#
+# =============================================================================
+
+train:
+  train_modality: image
+
+  batch_size: 2
+
+  accumulate_grad_batches: 8
+
+  # Keep the same LR as the full fine-tuning experiment initially so that
+  # the comparison isolates the effect of LoRA.
+  lr: 4.0e-5
+
+  weight_decay: 1.0e-4
+
+  max_epochs: 200
+
+  # Full validation every five epochs.
+  eval_every_epochs: 5
+
+  log_every_steps: 50
+
+  # Gradient clipping from the LF-SGG/Pix2SG setup.
+  grad_clip: 0.1
+
+  precision: 16-mixed
+
+  # Patience counts validation checks, not individual epochs.
+  early_stopping_patience: 10
+
+
+# =============================================================================
+# Location-free inference and evaluation
+# =============================================================================
+#
+# Generation uses the same behavior as location_free.yaml.
+#
+# Entity classes:
+#     nucleus sampling
+#
+# Instance/predicate tokens:
+#     handled by the decoder's structured generation logic
+#
+# Evaluation:
+#     R@20
+#     R@50
+#     R@100
+#
+# =============================================================================
+
+eval:
+  eval_modality: image
+
+  batch_size: 1
+
+  ks: [20, 50, 100]
+
+  # Generate at most 55 relations for the current experiment.
+  max_rels: 55
+
+  temperature: 1.75
+
+  top_p: 0.95
+
+  top_k: 0
+
+  entity_sampling: stochastic
+
+  allow_end: false
+
+  matcher_n: 3
+  matcher_depth: 10
+
+  matcher_identity_fallback: false
