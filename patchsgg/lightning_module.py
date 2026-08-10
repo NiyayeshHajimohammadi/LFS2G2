@@ -30,7 +30,8 @@ class SGGLightning(pl.LightningModule):
         self.model = PatchSGGModel(cfg)
         self._val_samples: List = []
         self._matcher = InstanceMatcher(
-            n=int(cfg.eval.get("matcher_n", 3)),
+            n=int(cfg.eval
+                  .get("matcher_n", 3)),
             depth_limit=int(cfg.eval.get("matcher_depth", 10)),
             allow_identity_fallback=bool(cfg.eval.get("matcher_identity_fallback", False)),
         )
