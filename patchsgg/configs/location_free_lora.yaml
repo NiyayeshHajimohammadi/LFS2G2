@@ -341,10 +341,14 @@ data:
   captions_cache: null
 
   vg:
-    roidb_file: data/vg/VG-SGG.h5
-    dict_file: data/vg/VG-SGG-dicts.json
-    image_meta: data/vg/image_data.json
-    image_dir: data/vg/images
+    roidb_file: /datasets/niyayesh/LFS2G2_VG/VG-SGG.h5
+    dict_file: /datasets/niyayesh/LFS2G2_VG/VG-SGG-dicts.json
+    image_meta: /datasets/niyayesh/LFS2G2_VG/image_data.json
+
+    # Root containing:
+    #   VG_100K/
+    #   VG_100K_2/
+    image_dir: /datasets/niyayesh/LFS2G2_VG
 
     instance_iou: 0.5
 
