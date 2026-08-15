@@ -101,35 +101,36 @@ bridge:
 decoder:
   type: cross_attn
 
+  # Pix2SG Transformer hidden dimension.
   d_model: 256
 
   # Pix2SG visual Transformer encoder.
   n_encoder_layers: 6
 
-  # Pix2SG autoregressive decoder.
+  # Pix2SG autoregressive Transformer decoder.
   n_layers: 2
 
   n_heads: 8
   dim_ff: 1024
   dropout: 0.1
 
-  # Official implementation uses pre_norm=False.
+  # Official Pix2SG implementation uses post-norm.
   norm_first: false
+
+  # DETR/Pix2SG-style normalized 2D sine positional encoding
+  # for the flattened visual feature grid.
+  use_2d_positional_encoding: true
 
   max_seq_len: 1600
 # =============================================================================
 # Training objective
 # =============================================================================
 loss:
-  # With freq_path=null this is categorical CE over the complete vocabulary,
-  # while retaining the LF-SGG END/NOISE down-weighting already implemented by
-  # this project. Predicate-frequency reweighting remains disabled.
-  type: ce_weighted
+  # Pix2SG uses categorical cross-entropy over the complete vocabulary.
+  type: ce
   label_smoothing: 0.0
-  freq_path: null
 
-  # Only used if loss.type is switched to matching_ce; left explicit so the
-  # graph-matching hyperparameters remain consistent with evaluation.
+  # Only used if loss.type is switched to matching_ce.
   weighted: false
   matcher_n: 3
   matcher_depth: 10

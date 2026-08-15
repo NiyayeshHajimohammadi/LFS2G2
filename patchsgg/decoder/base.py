@@ -27,19 +27,33 @@ class GraphDecoder(nn.Module):
 
         # Project conditioning features from the encoder dimension into the
         # decoder hidden dimension.
-        self.cond_proj = nn.Linear(cond_dim, self.d_model)
+        self.cond_proj = nn.Linear(
+            cond_dim,
+            self.d_model,
+        )
 
         # Scene-graph token embeddings.
-        self.token_embed = nn.Embedding(vocab.vocab_size, self.d_model)
+        self.token_embed = nn.Embedding(
+            vocab.vocab_size,
+            self.d_model,
+        )
 
         # Learned positional embeddings used by the non-GPT-2 decoders.
-        self.pos_embed = nn.Embedding(self.max_seq_len, self.d_model)
+        self.pos_embed = nn.Embedding(
+            self.max_seq_len,
+            self.d_model,
+        )
 
         # Final normalization before the graph-vocabulary prediction head.
-        self.norm = nn.LayerNorm(self.d_model)
+        self.norm = nn.LayerNorm(
+            self.d_model
+        )
 
         # Predict one token from the complete scene-graph vocabulary.
-        self.head = nn.Linear(self.d_model, vocab.vocab_size)
+        self.head = nn.Linear(
+            self.d_model,
+            vocab.vocab_size,
+        )
 
     def _hidden(
         self,
@@ -49,12 +63,16 @@ class GraphDecoder(nn.Module):
         """Return decoder hidden states with shape ``[B, T, d_model]``."""
         raise NotImplementedError
 
-    def _embed_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
+    def _embed_tokens(
+        self,
+        tokens: torch.Tensor,
+    ) -> torch.Tensor:
         """Embed graph tokens and add their positional embeddings."""
+
         if tokens.shape[1] > self.max_seq_len:
             raise ValueError(
-                f"token sequence length {tokens.shape[1]} exceeds decoder context "
-                f"{self.max_seq_len}"
+                f"token sequence length {tokens.shape[1]} "
+                f"exceeds decoder context {self.max_seq_len}"
             )
 
         positions = torch.arange(
@@ -73,9 +91,19 @@ class GraphDecoder(nn.Module):
         tokens: torch.Tensor,
     ) -> torch.Tensor:
         """Return graph-vocabulary logits with shape ``[B, T, V]``."""
-        hidden = self._hidden(cond, tokens)
-        hidden = self.norm(hidden)
-        return self.head(hidden)
+
+        hidden = self._hidden(
+            cond,
+            tokens,
+        )
+
+        hidden = self.norm(
+            hidden
+        )
+
+        return self.head(
+            hidden
+        )
 
     def forward(
         self,
@@ -83,7 +111,13 @@ class GraphDecoder(nn.Module):
         input_tokens: torch.Tensor,
     ) -> torch.Tensor:
         """Teacher-forced logits ``[B, T, V]`` aligned to target tokens."""
-        return self.logits(cond, input_tokens)
+
+        # The teacher-forcing shift itself is created by build_train_pair()
+        # in patchsgg.graph_seq.linearize.
+        return self.logits(
+            cond,
+            input_tokens,
+        )
 
     @torch.no_grad()
     def generate(
@@ -92,6 +126,8 @@ class GraphDecoder(nn.Module):
         gen_cfg: GenConfig,
     ):
         """Generate with full-prefix recomputation for non-cached decoders."""
+
+        # START token + five generated tokens per relation.
         required_positions = (
             1
             + int(gen_cfg.max_rels) * TOKENS_PER_REL
@@ -99,8 +135,8 @@ class GraphDecoder(nn.Module):
 
         if required_positions > self.max_seq_len:
             raise ValueError(
-                f"generation needs {required_positions} positions but decoder has "
-                f"{self.max_seq_len}"
+                f"generation needs {required_positions} positions "
+                f"but decoder has {self.max_seq_len}"
             )
 
         start_tokens = torch.full(
@@ -110,7 +146,11 @@ class GraphDecoder(nn.Module):
             device=cond.tokens.device,
         )
 
-        def step_fn(sequence: torch.Tensor) -> torch.Tensor:
+        def step_fn(
+            sequence: torch.Tensor,
+        ) -> torch.Tensor:
+            # constrained_generate() gives us the complete prefix.
+            # We return logits for only the next token.
             return self.logits(
                 cond,
                 sequence,
@@ -129,6 +169,7 @@ class GraphDecoder(nn.Module):
         device,
     ) -> torch.Tensor:
         """Create a standard additive causal attention mask."""
+
         return torch.triu(
             torch.full(
                 (length, length),
@@ -144,52 +185,37 @@ def build_decoder(
     vocab: GraphVocab,
     cond_dim: int,
 ) -> GraphDecoder:
-    """Construct the decoder selected by ``cfg.decoder.type``.
+    """Construct the decoder selected by ``cfg.decoder.type``."""
 
-    Supported decoder types:
-
-    ``cross_attn``
-        The project's custom Transformer cross-attention decoder.
-
-    ``prefix``
-        The project's prefix-conditioning Transformer decoder.
-
-    ``gpt2_cross_attn``
-        Hugging Face GPT-2 with image/text conditioning through
-        cross-attention.
-
-        GPT-2 additionally supports three training strategies:
-
-        1. Full fine-tuning
-           ``freeze_pretrained=False`` and ``lora.enabled=False``
-
-        2. Frozen pretrained GPT-2
-           ``freeze_pretrained=True`` and ``lora.enabled=False``
-
-        3. LoRA adaptation
-           ``lora.enabled=True``
-
-        LoRA is completely optional. Configurations without a ``lora``
-        section behave exactly as before, with LoRA disabled.
-    """
-    kind = str(cfg.decoder.type)
+    kind = str(
+        cfg.decoder.type
+    )
 
     # ------------------------------------------------------------------
-    # Sequence-length requirements
+    # Required sequence length
     # ------------------------------------------------------------------
     #
-    # One START token is followed by five tokens for every relation:
+    # Training:
     #
-    #   [subject, subject_instance, predicate, object, object_instance]
+    #   START + max_num_rels * 5
     #
-    # The decoder must therefore be large enough for both training and
-    # the requested evaluation-generation length.
+    # Evaluation:
+    #
+    #   START + eval.max_rels * 5
+    #
+    # The positional table must be large enough for whichever is larger.
     # ------------------------------------------------------------------
+
     minimum_seq_len = (
         1
         + max(
             vocab.max_num_rels,
-            int(cfg.eval.get("max_rels", 100)),
+            int(
+                cfg.eval.get(
+                    "max_rels",
+                    100,
+                )
+            ),
         )
         * TOKENS_PER_REL
     )
@@ -210,30 +236,18 @@ def build_decoder(
     # ==================================================================
     # Hugging Face GPT-2 cross-attention decoder
     # ==================================================================
+
     if kind == "gpt2_cross_attn":
         from patchsgg.decoder.gpt2_decoder import GPT2CrossAttnDecoder
 
-        # --------------------------------------------------------------
-        # Optional LoRA configuration
-        # --------------------------------------------------------------
+        # Optional LoRA configuration.
         #
-        # Calling .get("lora", {}) keeps older configuration files fully
-        # backward-compatible.
-        #
-        # For example, an old decoder configuration containing only:
-        #
-        #   decoder:
-        #     type: gpt2_cross_attn
-        #     freeze_pretrained: false
-        #
-        # results in:
-        #
-        #   lora_enabled = False
-        #
-        # and therefore behaves exactly as it did before LoRA support was
-        # introduced.
-        # --------------------------------------------------------------
-        lora_cfg = cfg.decoder.get("lora", {})
+        # If decoder.lora is absent, LoRA remains disabled so older
+        # configurations retain their previous behaviour.
+        lora_cfg = cfg.decoder.get(
+            "lora",
+            {},
+        )
 
         return GPT2CrossAttnDecoder(
             vocab=vocab,
@@ -243,22 +257,26 @@ def build_decoder(
             # ----------------------------------------------------------
             # Hugging Face GPT-2 source
             # ----------------------------------------------------------
+
             model_name=str(
                 cfg.decoder.get(
                     "model_name",
                     "openai-community/gpt2",
                 )
             ),
+
             revision=str(
                 cfg.decoder.get(
                     "revision",
                     "main",
                 )
             ),
+
             cache_dir=cfg.decoder.get(
                 "cache_dir",
                 None,
             ),
+
             local_files_only=bool(
                 cfg.decoder.get(
                     "local_files_only",
@@ -269,30 +287,35 @@ def build_decoder(
             # ----------------------------------------------------------
             # GPT-2 training/runtime options
             # ----------------------------------------------------------
+
             gradient_checkpointing=bool(
                 cfg.decoder.get(
                     "gradient_checkpointing",
                     True,
                 )
             ),
+
             freeze_pretrained=bool(
                 cfg.decoder.get(
                     "freeze_pretrained",
                     False,
                 )
             ),
+
             tie_graph_embeddings=bool(
                 cfg.decoder.get(
                     "tie_graph_embeddings",
                     True,
                 )
             ),
+
             extend_positions=bool(
                 cfg.decoder.get(
                     "extend_positions",
                     True,
                 )
             ),
+
             dropout=float(
                 cfg.decoder.get(
                     "dropout",
@@ -303,43 +326,35 @@ def build_decoder(
             # ----------------------------------------------------------
             # Optional LoRA configuration
             # ----------------------------------------------------------
-            #
-            # If decoder.lora is missing entirely, LoRA defaults to off.
-            #
-            # Exact target-module selection is intentionally handled
-            # inside GPT2CrossAttnDecoder rather than here. The decoder
-            # knows its GPT-2 module hierarchy and can therefore avoid
-            # accidentally applying LoRA to:
-            #
-            #   - newly-created cross-attention
-            #   - GPT-2 MLP layers
-            #
-            # unless support for those targets is explicitly added later.
-            # ----------------------------------------------------------
+
             lora_enabled=bool(
                 lora_cfg.get(
                     "enabled",
                     False,
                 )
             ),
+
             lora_r=int(
                 lora_cfg.get(
                     "r",
                     8,
                 )
             ),
+
             lora_alpha=int(
                 lora_cfg.get(
                     "alpha",
                     16,
                 )
             ),
+
             lora_dropout=float(
                 lora_cfg.get(
                     "dropout",
                     0.05,
                 )
             ),
+
             lora_bias=str(
                 lora_cfg.get(
                     "bias",
@@ -349,61 +364,106 @@ def build_decoder(
         )
 
     # ==================================================================
-    # Existing custom decoders
-    # ==================================================================
-    #
-    # These decoders have nothing to do with GPT-2 or LoRA and therefore
-    # remain completely unchanged.
+    # Shared arguments for custom Transformer decoders
     # ==================================================================
 
     common = {
         "vocab": vocab,
         "cond_dim": cond_dim,
-        "d_model": int(cfg.decoder.d_model),
+        "d_model": int(
+            cfg.decoder.d_model
+        ),
         "max_seq_len": max_seq_len,
     }
 
-    # ------------------------------------------------------------------
-    # Transformer cross-attention decoder
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Pix2SG-style Transformer cross-attention decoder
+    # ==================================================================
+
     if kind == "cross_attn":
         from patchsgg.decoder.cross_attn_decoder import CrossAttnDecoder
 
         return CrossAttnDecoder(
-        n_layers=int(cfg.decoder.n_layers),
+            # Autoregressive graph-decoder layers.
+            n_layers=int(
+                cfg.decoder.n_layers
+            ),
 
-        n_encoder_layers=int(
-            cfg.decoder.get(
-                "n_encoder_layers",
-                0,
-            )
-        ),
+            # Optional visual Transformer encoder.
+            #
+            # location_free_paper.yaml uses:
+            #
+            #   n_encoder_layers: 6
+            #
+            # Older configs default to zero.
+            n_encoder_layers=int(
+                cfg.decoder.get(
+                    "n_encoder_layers",
+                    0,
+                )
+            ),
 
-        n_heads=int(cfg.decoder.n_heads),
-        dim_ff=int(cfg.decoder.dim_ff),
-        dropout=float(cfg.decoder.dropout),
+            n_heads=int(
+                cfg.decoder.n_heads
+            ),
 
-        norm_first=bool(
-            cfg.decoder.get(
-                "norm_first",
-                True,
-            )
-        ),
+            dim_ff=int(
+                cfg.decoder.dim_ff
+            ),
 
-        **common,
-    )
+            dropout=float(
+                cfg.decoder.dropout
+            ),
 
-    # ------------------------------------------------------------------
-    # Prefix-conditioning decoder
-    # ------------------------------------------------------------------
+            # Pix2SG uses post-norm:
+            #
+            #   norm_first: false
+            #
+            # Older project configs retain their original pre-norm default.
+            norm_first=bool(
+                cfg.decoder.get(
+                    "norm_first",
+                    True,
+                )
+            ),
+
+            # Optional DETR/Pix2SG-style visual 2D positional encoding.
+            #
+            # Disabled by default so unrelated configs are unaffected.
+            use_2d_positional_encoding=bool(
+                cfg.decoder.get(
+                    "use_2d_positional_encoding",
+                    False,
+                )
+            ),
+
+            **common,
+        )
+
+    # ==================================================================
+    # Prefix-conditioning Transformer decoder
+    # ==================================================================
+
     if kind == "prefix":
         from patchsgg.decoder.prefix_decoder import PrefixDecoder
 
         return PrefixDecoder(
-            n_layers=int(cfg.decoder.n_layers),
-            n_heads=int(cfg.decoder.n_heads),
-            dim_ff=int(cfg.decoder.dim_ff),
-            dropout=float(cfg.decoder.dropout),
+            n_layers=int(
+                cfg.decoder.n_layers
+            ),
+
+            n_heads=int(
+                cfg.decoder.n_heads
+            ),
+
+            dim_ff=int(
+                cfg.decoder.dim_ff
+            ),
+
+            dropout=float(
+                cfg.decoder.dropout
+            ),
+
             **common,
         )
 
