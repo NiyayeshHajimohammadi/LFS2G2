@@ -370,12 +370,28 @@ def build_decoder(
         from patchsgg.decoder.cross_attn_decoder import CrossAttnDecoder
 
         return CrossAttnDecoder(
-            n_layers=int(cfg.decoder.n_layers),
-            n_heads=int(cfg.decoder.n_heads),
-            dim_ff=int(cfg.decoder.dim_ff),
-            dropout=float(cfg.decoder.dropout),
-            **common,
-        )
+        n_layers=int(cfg.decoder.n_layers),
+
+        n_encoder_layers=int(
+            cfg.decoder.get(
+                "n_encoder_layers",
+                0,
+            )
+        ),
+
+        n_heads=int(cfg.decoder.n_heads),
+        dim_ff=int(cfg.decoder.dim_ff),
+        dropout=float(cfg.decoder.dropout),
+
+        norm_first=bool(
+            cfg.decoder.get(
+                "norm_first",
+                True,
+            )
+        ),
+
+        **common,
+    )
 
     # ------------------------------------------------------------------
     # Prefix-conditioning decoder

@@ -64,10 +64,13 @@ vocab:
 encoders:
   space: clip
   clip_model: ViT-L/14
-
-  # Pix2SG conditions on the flattened spatial feature map, not one pooled
-  # global vector. ClipImageEncoder already exposes the ViT patch-token grid.
   image_token_mode: patch
+
+  # Partial ViT fine-tuning.
+  train_image_encoder: true
+
+  # Freeze CLIP ViT blocks 0-15 and train blocks 16 onward.
+  freeze_first_n: 16
 
   # Unused in this image-only experiment, retained for config compatibility.
   text_token_mode: pooled
@@ -98,17 +101,22 @@ bridge:
 decoder:
   type: cross_attn
 
-  # Paper Transformer dimensions.
   d_model: 256
+
+  # Pix2SG visual Transformer encoder.
+  n_encoder_layers: 6
+
+  # Pix2SG autoregressive decoder.
   n_layers: 2
+
   n_heads: 8
   dim_ff: 1024
   dropout: 0.1
 
-  # START + 300 relations * 5 tokens = 1501 positions.
-  # 1600 matches the comfortably-sized sequence table used by the Pix2SG code.
-  max_seq_len: 1600
+  # Official implementation uses pre_norm=False.
+  norm_first: false
 
+  max_seq_len: 1600
 # =============================================================================
 # Training objective
 # =============================================================================
