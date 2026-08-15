@@ -1,0 +1,222 @@
+# =============================================================================
+# Location-Free Scene Graph Generation (Pix2SG) — Visual Genome — ViT-L
+# Paper-faithful runnable mapping onto EXISTING LFS2G2 components
+# =============================================================================
+#
+# Target from the paper (Visual Genome, Pix2SG VIT-L):
+#   R@20  = 22.98
+#   R@50  = 26.92
+#   R@100 = 30.05
+#
+# IMPORTANT MAPPING TO THIS REPOSITORY
+# ------------------------------------
+# Paper component                 LFS2G2 component used here
+# ------------------------------  --------------------------------------------
+# contrastively pretrained ViT-L  encoders.space=clip, clip_model=ViT-L/14
+# flattened visual feature map    image_token_mode=patch
+# autoregressive Transformer      decoder.type=cross_attn
+# Transformer hidden size 256     decoder.d_model=256
+# 8 attention heads               decoder.n_heads=8
+# 2 decoding layers               decoder.n_layers=2
+# 1024 FFN (official code)        decoder.dim_ff=1024
+# categorical CE                  loss.type=ce_weighted, freq_path=null
+# image -> graph                  train/eval modality=image
+# HTS branching factor 3          eval.matcher_n=3
+#
+# This deliberately does NOT use GPT-2, d , CapDec, DeCap, text encoders,
+# bounding boxes as model inputs, coordinate tokens, or location supervision.
+#
+# Paper implementation details:
+#   AdamW, lr=4e-5, weight_decay=1e-4, batch=16, 200 epochs + early stopping,
+#   300 generated relations, nucleus top-p=0.95, hidden=256, heads=8,
+#   6 encoding layers + 2 decoding layers.
+#
+# The paper does not publish its early-stopping patience.  This pipeline needs
+# a numeric patience, so 10 validation checks is kept as the project convention.
+# Validation is run every epoch here, making that patience equal to 10 epochs.
+# =============================================================================
+
+seed: 4
+device: cuda
+output_dir: outputs/location_free_pix2sg_paper
+num_workers: 10
+
+# =============================================================================
+# Graph vocabulary — Visual Genome / LF-SGG tokenization
+# =============================================================================
+vocab:
+  # 50 foreground predicates + background slot.
+  n_preds: 51
+
+  # 150 foreground entity classes + background slot.
+  n_entities: 151
+
+  # Instance-token range used by Pix2SG/LF-SGG.
+  max_instance_id: 30
+  random_max_instance_id: 10
+
+  # Maximum number of GT relations represented during training.
+  max_num_rels: 55
+
+# =============================================================================
+# Image encoder — paper's contrastively-pretrained VIT-L path
+# =============================================================================
+encoders:
+  space: clip
+  clip_model: ViT-L/14
+
+  # Pix2SG conditions on the flattened spatial feature map, not one pooled
+  # global vector. ClipImageEncoder already exposes the ViT patch-token grid.
+  image_token_mode: patch
+
+  # Unused in this image-only experiment, retained for config compatibility.
+  text_token_mode: pooled
+  max_text_tokens: 32
+
+  # Do not construct an unused text encoder.
+  build_only_required: true
+
+  # OpenAI CLIP ViT-L/14 native input resolution.
+  resize_dim: 224
+  clip_resize_dim: 224
+
+# =============================================================================
+# Conditioning bridge
+# =============================================================================
+# No text/image modality transfer is involved in the Pix2SG experiment.
+bridge:
+  type: identity
+  types: null
+  noise_std: 0.08
+  projection_temperature: 0.01
+  memory_path: checkpoints/decap_memory.pt
+  project_tokens: true
+
+# =============================================================================
+# Pix2SG autoregressive graph decoder — existing custom cross-attention path
+# =============================================================================
+decoder:
+  type: cross_attn
+
+  # Paper Transformer dimensions.
+  d_model: 256
+  n_layers: 2
+  n_heads: 8
+  dim_ff: 1024
+  dropout: 0.1
+
+  # START + 300 relations * 5 tokens = 1501 positions.
+  # 1600 matches the comfortably-sized sequence table used by the Pix2SG code.
+  max_seq_len: 1600
+
+# =============================================================================
+# Training objective
+# =============================================================================
+loss:
+  # With freq_path=null this is categorical CE over the complete vocabulary,
+  # while retaining the LF-SGG END/NOISE down-weighting already implemented by
+  # this project. Predicate-frequency reweighting remains disabled.
+  type: ce_weighted
+  label_smoothing: 0.0
+  freq_path: null
+
+  # Only used if loss.type is switched to matching_ce; left explicit so the
+  # graph-matching hyperparameters remain consistent with evaluation.
+  weighted: false
+  matcher_n: 3
+  matcher_depth: 10
+
+# =============================================================================
+# Visual Genome
+# =============================================================================
+data:
+  dataset: vg
+  text_view: serialize
+  serialize_with_instances: false
+  captions_cache: null
+
+  vg:
+    roidb_file: /datasets/niyayesh/LFS2G2_VG/VG-SGG.h5
+    dict_file: /datasets/niyayesh/LFS2G2_VG/VG-SGG-dicts.json
+    image_meta: /datasets/niyayesh/LFS2G2_VG/image_data.json
+    image_dir: /datasets/niyayesh/LFS2G2_VG
+
+    # Boxes are used only offline to recover consistent same-class instance
+    # identities in the VG annotations; they are never given to the model.
+    instance_iou: 0.5
+
+    # Standard VG validation split used by this pipeline.
+    num_val_images: 5000
+    num_images: -1
+    filter_empty_rels: true
+
+    # Keep disabled in the present LFS2G2 loader. Its optional duplicate filter
+    # deterministically picks the first predicate and also applies at validation,
+    # which is not the behavior of the official LF-SGG loader.
+    filter_duplicate_rels: false
+
+    image_resize_mode: center_crop
+
+# =============================================================================
+# Optimization — paper values
+# =============================================================================
+train:
+  train_modality: image
+
+  # Use the literal paper batch size, not a smaller physical batch with gradient
+  # accumulation, because gradient accumulation is not mathematically identical.
+  batch_size: 16
+  accumulate_grad_batches: 1
+
+  lr: 4.0e-5
+  weight_decay: 1.0e-4
+
+  # Paper: 200 epochs with early stopping.
+  max_epochs: 200
+
+  # Validate every epoch so best-R@20 checkpointing and early stopping operate at
+  # epoch resolution. The paper does not publish a different validation cadence.
+  eval_every_epochs: 5
+  log_every_steps: 50
+
+  grad_clip: 0.1
+
+  # The paper does not state AMP/mixed precision, so use full precision rather
+  # than introducing an unsourced numerical change.
+  precision: 32-true
+
+  # Paper says "early stopping" but does not give patience. This value is the
+  # project convention and is therefore the only training-control value here
+  # that is not explicitly specified by the paper.
+  early_stopping_patience: 10
+
+# =============================================================================
+# Location-free autoregressive inference / LF-SGG evaluation
+# =============================================================================
+eval:
+  eval_modality: image
+
+  # Keep the same literal batch size where memory allows. For evaluation only,
+  # lowering this does not change the model weights, but stochastic generation
+  # can consume RNG in a different batching pattern.
+  batch_size: 16
+
+  ks: [20, 50, 100]
+
+  # Paper default for reported full results.
+  max_rels: 300
+
+  # LF-SGG released generation constants. Entity classes are nucleus-sampled;
+  # the structured non-entity roles are selected greedily by this implementation.
+  temperature: 1.75
+  top_p: 0.95
+  top_k: 0
+  entity_sampling: stochastic
+
+  # The paper reports fixed-length generation for the experiments.
+  allow_end: false
+
+  # Heuristic Tree Search branching factor B=3.
+  matcher_n: 3
+  matcher_depth: 10
+  matcher_identity_fallback: false
