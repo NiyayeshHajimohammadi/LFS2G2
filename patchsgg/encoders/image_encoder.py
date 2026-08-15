@@ -23,8 +23,6 @@ class DinoV2ImageEncoder(nn.Module):
         self.cfg = cfg
         self.device = cfg.device
         self.token_mode = cfg.encoders.image_token_mode
-        # My comment: "patch" → full spatial grid
-        # My comment: "pooled" → CLS-only bottleneck
         self.model_name = cfg.encoders.dino_model  # e.g. 'dinov2_vitb14' / 'dinov2_vitl14_reg'
         self.model = torch.hub.load("facebookresearch/dinov2", self.model_name)
         self.model.eval().to(self.device)
@@ -56,34 +54,75 @@ class ClipImageEncoder(nn.Module):
 
         self.model, self.preprocess = clip.load(cfg.encoders.clip_model, device=self.device)
         self.model.eval()
-        for p in self.model.parameters():
-            p.requires_grad_(False)
+
+    # Freeze everything first.
+    for p in self.model.parameters():
+        p.requires_grad_(False)
+
+    self.train_image_encoder = bool(
+        cfg.encoders.get("train_image_encoder", False)
+    )
+
+    if self.train_image_encoder:
+        freeze_first_n = int(
+            cfg.encoders.get("freeze_first_n", 16)
+        )
+
+        blocks = self.model.visual.transformer.resblocks
+
+        if not 0 <= freeze_first_n <= len(blocks):
+            raise ValueError(
+                f"freeze_first_n must be in [0, {len(blocks)}], "
+                f"got {freeze_first_n}"
+            )
+
+        # Same basic strategy as released LF-SGG:
+        # early ViT blocks frozen, later blocks trainable.
+        for block in blocks[freeze_first_n:]:
+            for p in block.parameters():
+                p.requires_grad_(True)
         self.embed_dim = self.model.text_projection.shape[1]
 
     @torch.no_grad()
     def encode(self, images: torch.Tensor) -> ConditioningSet:
-        """Patch tokens from CLIP ViT (projected to the joint space) + pooled image embedding."""
         images = images.to(self.device)
-        pooled = self.model.encode_image(images).float()
-        pooled = pooled / pooled.norm(dim=-1, keepdim=True)#My comment: L2 normalization
-        if self.token_mode == "pooled":
-            return ConditioningSet(tokens=pooled.unsqueeze(1), pooled=pooled)
         v = self.model.visual
-        x = v.conv1(images.type(self.model.dtype))#My comment: Transforms image into patch grid.
-        x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)  # [B, grid^2, width]
-        cls = v.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device)#My comment:a learnable global token.
-        x = torch.cat([cls, x], dim=1) + v.positional_embedding.to(x.dtype)
-        x = v.ln_pre(x).permute(1, 0, 2)
-        x = v.transformer(x).permute(1, 0, 2)
+        x = v.conv1(images.type(self.model.dtype))
+        x = x.reshape(x.shape[0],x.shape[1],-1,).permute(0, 2, 1)
+        cls = (v.class_embedding.to(x.dtype)+ torch.zeros(x.shape[0],1,x.shape[-1],dtype=x.dtype,device=x.device,))
+        x = torch.cat([cls, x],dim=1,)
+        x = (x + v.positional_embedding.to(x.dtype))
+        x = v.ln_pre(x)
+        x = x.permute(1, 0, 2)
+        x = v.transformer(x)
+        x = x.permute(1, 0, 2)
+        # Apply final CLIP visual normalization to all tokens.
         x = v.ln_post(x)
-        patches = x[:, 1:, :].float()                  # drop CLS -> [B, grid^2, width]
-        if v.proj is not None:
-            patches = patches @ v.proj.float()         # -> joint dim
-        return ConditioningSet(tokens=patches, pooled=pooled)
+        # --------------------------------------------------------------
+        # CLS representation
+        # --------------------------------------------------------------
+        pooled = x[:, 0, :]
 
-#My comment:
-# Manual CLIP internals (HIGH RISK)
-# No guaranteed alignment check between encoders (MEDIUM)
-# Token space mismatch risk (MEDIUM)
-# Preprocessing pipeline inconsistency (MEDIUM)
-# No positional regularization alignment across models (LOW-MEDIUM)
+        # --------------------------------------------------------------
+        # Spatial patch representations
+        # --------------------------------------------------------------
+        patches = x[:, 1:, :]
+
+        if v.proj is not None:
+            proj = v.proj.to(x.dtype)
+
+            pooled = pooled @ proj
+            patches = patches @ proj
+
+        pooled = pooled.float()
+        patches = patches.float()
+        pooled = pooled / pooled.norm(dim=-1,keepdim=True,)
+        if self.token_mode == "pooled":
+            return ConditioningSet(
+                tokens=pooled.unsqueeze(1),
+                pooled=pooled,)
+        return ConditioningSet(
+            tokens=patches,
+            pooled=pooled,
+        )
+

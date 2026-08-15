@@ -148,11 +148,24 @@ class PatchSGGModel(nn.Module):
         return sequences_to_predictions(sequences, scores, self.vocab)
 
     def trainable_parameters(self):
-        """Return trainable decoder and bridge parameters; encoders stay frozen."""
-        parameters = list(self.decoder.parameters())
-        parameters.extend(
-            parameter
-            for parameter in self.bridge.parameters()
-            if parameter.requires_grad
-        )
-        return [parameter for parameter in parameters if parameter.requires_grad]
+        """Return every parameter that this configuration has marked trainable."""
+        modules = [
+            self.decoder,
+            self.bridge,
+            self.text_encoder,
+            self.image_encoder,
+        ]
+
+        parameters = []
+
+        for module in modules:
+            if module is None:
+                continue
+
+            parameters.extend(
+                parameter
+                for parameter in module.parameters()
+                if parameter.requires_grad
+            )
+
+        return parameters
