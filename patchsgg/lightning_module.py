@@ -91,7 +91,9 @@ class SGGDataModule(pl.LightningDataModule):
         self.cfg = cfg
         self.vocab = build_vocab(cfg)
         seed = int(cfg.get("seed", 42))
-        self.train_collate = GraphCollator(vocab=self.vocab, seed=seed, deterministic=False)
+        self.train_collate = GraphCollator(vocab=self.vocab,seed=seed,deterministic=False,pmar_enabled=(cfg.loss.type == "pmar"),
+            pmar_exact_threshold=int(cfg.loss.get("exact_threshold",8)),
+            pmar_num_samples=int(cfg.loss.get("num_samples",8)),)
         self.val_collate = GraphCollator(vocab=self.vocab, seed=seed + 1, deterministic=True)
         self.collate = self.train_collate  # backwards-compatible attribute
 

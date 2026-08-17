@@ -77,6 +77,8 @@ def build_loss(cfg, vocab: GraphVocab) -> Loss:
                               matcher_depth=int(cfg.loss.get("matcher_depth", 10)))
     if kind == "order_agnostic":
         from patchsgg.losses.order_agnostic import OrderAgnosticCELoss
-
         return OrderAgnosticCELoss(vocab, label_smoothing=ls)
+    elif kind == "pmar":
+        from patchsgg.losses.pmar import PMARLoss
+        return PMARLoss()
     raise ValueError(f"unknown loss.type {kind!r}")

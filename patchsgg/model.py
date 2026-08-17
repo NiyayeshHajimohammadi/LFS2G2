@@ -129,13 +129,96 @@ class PatchSGGModel(nn.Module):
         batch: Dict,
         modality: str = "text",
     ) -> torch.Tensor:
-        conditioning = self.encode(batch, modality=modality, training=True)
-        device = conditioning.tokens.device
-        input_tokens = batch["input_tokens"].to(device=device, dtype=torch.long)
-        target_tokens = batch["target_tokens"].to(device=device, dtype=torch.long)
 
-        logits = self.decoder(conditioning, input_tokens)
-        return self.loss_fn(logits, target_tokens, input_tokens)
+        conditioning = self.encode(
+            batch,
+            modality=modality,
+            training=True,
+        )
+
+        device = conditioning.tokens.device
+
+
+        if self.cfg.loss.type == "pmar":
+
+            input_tokens = batch[
+                "candidate_input_tokens"
+            ].to(
+                device=device,
+                dtype=torch.long,
+            )
+
+            target_tokens = batch[
+                "candidate_target_tokens"
+            ].to(
+                device=device,
+                dtype=torch.long,
+            )
+
+            candidate_owner = batch[
+                "candidate_owner"
+            ].to(
+                device=device
+            )
+
+
+            candidate_conditioning = ConditioningSet(
+                tokens=conditioning.tokens[
+                    candidate_owner
+                ],
+
+                pooled=conditioning.pooled[
+                    candidate_owner
+                ],
+
+                mask=conditioning.mask[
+                    candidate_owner
+                ],
+            )
+
+
+            logits = self.decoder(
+                candidate_conditioning,
+                input_tokens,
+            )
+
+
+            return self.loss_fn(
+                logits,
+                target_tokens,
+                None,
+                candidate_owner,
+            )
+
+
+        else:
+
+            input_tokens = batch[
+                "input_tokens"
+            ].to(
+                device=device,
+                dtype=torch.long,
+            )
+
+            target_tokens = batch[
+                "target_tokens"
+            ].to(
+                device=device,
+                dtype=torch.long,
+            )
+
+
+            logits = self.decoder(
+                conditioning,
+                input_tokens,
+            )
+
+
+            return self.loss_fn(
+                logits,
+                target_tokens,
+                input_tokens,
+            )
 
     @torch.no_grad()
     def predict(

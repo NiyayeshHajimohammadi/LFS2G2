@@ -1,0 +1,110 @@
+# =============================================================================
+# Location-Free Scene Graph Generation
+# PMAR training configuration
+#
+# Structural refinement + Permutation-Marginalized Autoregressive Loss
+# =============================================================================
+
+# Start from the validated Pix2SG/LF-SGG paper configuration
+_base_: location_free_paper.yaml
+
+
+# -----------------------------------------------------------------------------
+# Output
+# -----------------------------------------------------------------------------
+
+output_dir: outputs/location_free_pmar
+
+
+# -----------------------------------------------------------------------------
+# Loss
+# -----------------------------------------------------------------------------
+
+loss:
+
+  # New PMAR objective
+  type: pmar
+
+  # PMAR requires true sequence likelihoods
+  # so disable smoothing initially
+  label_smoothing: 0.0
+
+
+  # ---------------------------------------------------------------------------
+  # Candidate generation
+  # ---------------------------------------------------------------------------
+
+  # If residual permutation count:
+  #
+  #       M = product(|cell|!)
+  #
+  # is smaller/equal than this:
+  #
+  #       enumerate all candidates
+  #
+  # otherwise:
+  #
+  #       sample num_samples candidates
+  #
+  exact_threshold: 8
+
+
+  # Number of sampled permutations
+  # when exact enumeration is too large
+  num_samples: 8
+
+
+  # Structural refinement method
+  refinement: wl
+
+
+  # Exact mode:
+  #
+  # different permutations may generate
+  # identical serialized sequences.
+  #
+  # Remove duplicates.
+  #
+  # Sampling mode:
+  # keep duplicate samples.
+  #
+  exact_deduplicate: true
+
+
+
+# -----------------------------------------------------------------------------
+# Data / serialization
+# -----------------------------------------------------------------------------
+
+data:
+
+  # Important:
+  #
+  # PMAR does NOT use the original
+  # random Pix2SG serialization.
+  #
+  # Candidate sequences are generated
+  # by graph_seq/pmar.py
+  #
+  pmar_enabled: true
+
+
+
+# -----------------------------------------------------------------------------
+# Training
+# -----------------------------------------------------------------------------
+
+trainer:
+
+  # keep identical to paper baseline
+  # inherited from location_free_paper.yaml
+
+  # no changes here initially
+
+
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+
+experiment_name: location_free_pmar

@@ -58,6 +58,7 @@ loss:
   matcher_n: 3
   matcher_depth: 10
 
+
 data:
   dataset: vg                      # vg | toy
   text_view: serialize             # serialize | llm_caption | mix
