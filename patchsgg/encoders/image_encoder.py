@@ -84,6 +84,10 @@ class ClipImageEncoder(nn.Module):
         )
 
         if self.train_image_encoder:
+            # OpenAI CLIP CUDA weights are fp16 by default.
+            # Train the visual backbone in fp32 for numerical stability.
+            self.model.visual.float()
+
             freeze_first_n = int(
                 cfg.encoders.get(
                     "freeze_first_n",

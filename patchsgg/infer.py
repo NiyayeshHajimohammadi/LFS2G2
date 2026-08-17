@@ -18,7 +18,26 @@ from patchsgg.data.factory import build_dataset
 from patchsgg.lightning_module import SGGLightning
 from patchsgg.model import build_vocab
 from patchsgg.train import _resolve_accelerator
+from patchsgg.graph_seq.vocab import VG_VOCAB
+from patchsgg.data.graph_text_views import serialize_graph
+from patchsgg.graph_seq.linearize import Relation
 
+def matcher_to_graph(tuples):
+    graph = []
+    for t in tuples:
+        subj_tok, subj_inst, pred_tok, obj_tok, obj_inst = t
+
+        rel = Relation(
+            VG_VOCAB.entity_idx(subj_tok),
+            subj_inst,
+            VG_VOCAB.predicate_idx(pred_tok),
+            VG_VOCAB.entity_idx(obj_tok),
+            obj_inst,
+        )
+
+        graph.append(rel)
+
+    return graph
 
 def _data_runtime_config(cli_cfg, checkpoint_cfg, device: str):
     """Use checkpoint model/encoder settings while allowing CLI data-path and loader overrides."""
@@ -92,19 +111,66 @@ def main(argv: List[str] | None = None):
     )
 
     trainer = pl.Trainer(accelerator=accelerator, devices=1, logger=False)
-    trainer.validate(model, dataloaders=loader)
+    # trainer.validate(model, dataloaders=loader)
 
+    # if args.dump:
+    #     model.to(device)
+    #     records = []
+    #     for batch in loader:
+    #         if isinstance(batch.get("images"), torch.Tensor):
+    #             batch["images"] = batch["images"].to(device)
+    #         preds = model.model.predict(batch, modality=model.cfg.eval.eval_modality)
+    #         for image_id, gt, pred in zip(batch["image_ids"], batch["gt_graphs"], preds):
+    #             records.append({"image_id": int(image_id), "gt": gt, "pred": pred})
+    #     with open(args.dump, "w", encoding="utf-8") as handle:
+    #         json.dump(records, handle)
+    #     print(f"wrote {len(records)} predictions -> {args.dump}")
     if args.dump:
         model.to(device)
         records = []
+
+        max_images = 10
+        count = 0
+
         for batch in loader:
             if isinstance(batch.get("images"), torch.Tensor):
                 batch["images"] = batch["images"].to(device)
-            preds = model.model.predict(batch, modality=model.cfg.eval.eval_modality)
-            for image_id, gt, pred in zip(batch["image_ids"], batch["gt_graphs"], preds):
-                records.append({"image_id": int(image_id), "gt": gt, "pred": pred})
+
+            preds = model.model.predict(
+                batch,
+                modality=model.cfg.eval.eval_modality
+            )
+
+            for image_id, gt, pred in zip(
+                batch["image_ids"],
+                batch["gt_graphs"],
+                preds
+            ):
+                records.append({
+                    "image_id": int(image_id),
+                    "gt": serialize_graph(
+                        matcher_to_graph(gt),
+                        ds.ind_to_classes,
+                        ds.ind_to_predicates,
+                        with_instances=True
+                    ),
+                    "pred": serialize_graph(
+                        matcher_to_graph(pred),
+                        ds.ind_to_classes,
+                        ds.ind_to_predicates,
+                        with_instances=True
+                    )})
+
+                count += 1
+                if count >= max_images:
+                    break
+
+            if count >= max_images:
+                break
+
         with open(args.dump, "w", encoding="utf-8") as handle:
             json.dump(records, handle)
+
         print(f"wrote {len(records)} predictions -> {args.dump}")
 
 

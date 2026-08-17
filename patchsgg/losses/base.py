@@ -23,18 +23,17 @@ import torch.nn.functional as F
 
 from patchsgg.graph_seq.vocab import GraphVocab
 
-#My comment: This module->given decoder logits and the correct graph-token sequence, how should PatchSGG convert the prediction error into one scalar loss?
 class Loss(nn.Module):
-    def __init__(self, vocab: GraphVocab, weight: Optional[torch.Tensor] = None, label_smoothing: float = 0.0):#My comment: weight is a tensor shaped [V]-> to have a token contribute more strongly than mistakes involving another token
+    def __init__(self, vocab: GraphVocab, weight: Optional[torch.Tensor] = None, label_smoothing: float = 0.0):
         super().__init__()
         self.vocab = vocab
         self.label_smoothing = label_smoothing
         self.register_buffer("weight", weight if weight is not None else torch.ones(vocab.vocab_size))
 
-    def _ce(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:#My comment: logit shaped [B,T,V] target shaped [B, T]
+    def _ce(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         return F.cross_entropy(
-            logits.reshape(-1, logits.shape[-1]),#My comment: [B, T, V]->[B × T, V]
-            target.reshape(-1),#My comment: [B, T]-> [B × T]
+            logits.reshape(-1, logits.shape[-1]),
+            target.reshape(-1),
             weight=self.weight.to(logits.dtype),
             ignore_index=self.vocab.no_known_token,
             label_smoothing=self.label_smoothing,
@@ -44,7 +43,7 @@ class Loss(nn.Module):
         return self._ce(logits, target)
 
 
-def _frequency_weights(vocab: GraphVocab, freq_path: Optional[str]) -> torch.Tensor:#My comment: creates a weight tensor shaped [vocab.vocab_size]
+def _frequency_weights(vocab: GraphVocab, freq_path: Optional[str]) -> torch.Tensor:
     """LF-SGG-style log weighting ``1/(log f + 1)``; END/NOISE strongly downweighted."""
     weights = torch.ones(vocab.vocab_size)
     if freq_path:
@@ -61,7 +60,7 @@ def _frequency_weights(vocab: GraphVocab, freq_path: Optional[str]) -> torch.Ten
     return weights
 
 
-def build_loss(cfg, vocab: GraphVocab) -> Loss: #My comment: Defines a factory function.
+def build_loss(cfg, vocab: GraphVocab) -> Loss: 
     kind = cfg.loss.type
     ls = float(getattr(cfg.loss, "label_smoothing", 0.0))
     if kind == "ce":

@@ -34,7 +34,6 @@ MatcherTuple = Tuple[int, int, int, int, int]
 # --------------------------------------------------------------------------------------------
 def relation_to_tokens(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> List[int]:
     """5 token ids in *sequence* order: sub_cls, sub_inst, obj_cls, obj_inst, predicate."""
-    #My comment: This function converts one semantic relationship into five integer tokens.
     return [
         vocab.entity_token(rel.subj_cls),
         vocab.instance_token(rel.subj_inst),
@@ -46,7 +45,6 @@ def relation_to_tokens(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> List[int]
 
 def tokens_to_relation(tok: Sequence[int], vocab: GraphVocab = VG_VOCAB) -> Relation:
     """Inverse of :func:`relation_to_tokens` for one 5-token block (sequence order)."""
-    #My comment: converts those token IDs back into a meaningful semantic relation.
     sub_cls, sub_inst, obj_cls, obj_inst, pred = tok
     return Relation(
         subj_cls=vocab.entity_idx(int(sub_cls)),
@@ -59,7 +57,6 @@ def tokens_to_relation(tok: Sequence[int], vocab: GraphVocab = VG_VOCAB) -> Rela
 
 def canonical_tuple(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> MatcherTuple:
     """LF-SGG matcher/metrics tuple (entities in token space, preds/instances 0-based)."""
-    #My comment: This function performs that reordering without changing the semantic meaning.
     return (
         vocab.entity_token(rel.subj_cls),
         rel.subj_inst,
@@ -67,11 +64,10 @@ def canonical_tuple(rel: Relation, vocab: GraphVocab = VG_VOCAB) -> MatcherTuple
         vocab.entity_token(rel.obj_cls),
         rel.obj_inst,
     )
-    #My comment: produces the special tuple format expected by LF-SGG matching and metrics.
 
 
 def graph_to_matcher_tuples(graph: Graph, vocab: GraphVocab = VG_VOCAB) -> List[MatcherTuple]:
-    return [canonical_tuple(r, vocab) for r in graph] #My comment: list comprehension.
+    return [canonical_tuple(r, vocab) for r in graph] 
 
 
 # --------------------------------------------------------------------------------------------
@@ -128,7 +124,6 @@ def build_train_pair(
     ``[NO_KNOWN, NO_KNOWN, NO_KNOWN, NOISE, END]`` so that NO_KNOWN positions can be masked out
     of the loss while the model still learns to emit END after the real graph.
     """
-    #My comment: It creates the input and target sequences for teacher forcing.
     rng = rng or np.random.default_rng()
     real = graph[: vocab.max_num_rels]
     n_real = len(real)
@@ -223,9 +218,3 @@ def permute_and_reindex_graph(
         )
 
     return remapped
-# Problems: 
-# No range validation when constructing or decoding relations. Invalid indices silently produce invalid tokens.
-# Hard truncation to max_num_rels discards information for dense scenes without warning.
-# Strict 5-token alignment means one decoding error can corrupt the parsing of every subsequent relation.
-# Training depends on correct loss masking for NO_KNOWN. If the loss function later forgets to ignore these tokens, training quality could degrade significantly.
-# Lack of explicit unit tests for round-trip guarantees such as sequence_to_graph(graph_to_sequence(g)) == g, which are critical invariants for this module.

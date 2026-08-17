@@ -41,7 +41,6 @@ class ProjectionLayer(nn.Module):
 
     @classmethod
     def from_config(cls, config):
-        #My comment: builds a model from a YAML file or dictionary.
         if isinstance(config, str):
             with open(config, "r") as f:
                 config = yaml.safe_load(f)["model"]
@@ -81,10 +80,3 @@ class ProjectionLayer(nn.Module):
             state_dict["hidden_layers.0.weight"] = state_dict.pop("linear_layer2.weight")
             state_dict["hidden_layers.0.bias"] = state_dict.pop("linear_layer2.bias")
         return super().load_state_dict(state_dict, strict)
-#My comment:
-# Several attributes are unused in your actual path
-# load_state_dict() should return the superclass result
-# No output normalization
-# Config inconsistency for keep_cls and keep_end_se
-# No input shape validation
-# Ambiguous training/frozen status
