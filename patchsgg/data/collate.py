@@ -6,41 +6,23 @@ from typing import Dict, Mapping, Sequence
 import numpy as np
 import torch
 from torch.utils.data import get_worker_info
+
 from patchsgg.graph_seq.linearize import (
     Relation,
     build_train_pair,
     graph_to_matcher_tuples,
     permute_and_reindex_graph,
 )
-
-from patchsgg.graph_seq.pmar import (
-    build_pmar_candidates,
-)
-
 from patchsgg.graph_seq.vocab import GraphVocab
 
 
 class GraphCollator:
     """Create the batch contract consumed by :class:`PatchSGGModel`."""
 
-    def __init__(
-        self,
-        vocab: GraphVocab,
-        seed: int = 42,
-        deterministic: bool = False,
-        pmar_enabled: bool = False,
-        pmar_exact_threshold: int = 8,
-        pmar_num_samples: int = 8,):
+    def __init__(self, vocab: GraphVocab, seed: int = 42, deterministic: bool = False):
         self.vocab = vocab
         self.seed = int(seed)
         self.deterministic = bool(deterministic)
-        self.pmar_enabled = bool(pmar_enabled)
-        self.pmar_exact_threshold = int(
-            pmar_exact_threshold
-        )
-        self.pmar_num_samples = int(
-            pmar_num_samples
-        )
         self._rngs: dict[int, np.random.Generator] = {}
 
     def __getstate__(self):
@@ -78,10 +60,6 @@ class GraphCollator:
         input_tokens: list[torch.Tensor] = []
         target_tokens: list[torch.Tensor] = []
         gt_graphs: list[list[tuple]] = []
-        candidate_input_tokens = []
-        candidate_target_tokens = []
-        candidate_owner = []
-        candidate_masks = []
 
         shared_rng = None if self.deterministic else self._worker_rng()
 
@@ -110,51 +88,17 @@ class GraphCollator:
 
             # LF-SGG target representation: random relation order during training,
             # followed by per-class instance IDs assigned by first appearance.
-            if self.pmar_enabled:
-                result = build_pmar_candidates(
-                    graph,
-                    self.vocab,
-                    exact_threshold=self.pmar_exact_threshold,
-                    num_samples=self.pmar_num_samples,
-                    seed=image_id,
-                )
-
-                for candidate in result.candidates:
-
-                    sequence = candidate.sequence
-
-                    inp = [
-                        self.vocab.start_token
-                    ] + sequence[:-1]
-
-                    tgt = sequence
-
-                    candidate_input_tokens.append(
-                        torch.tensor(inp)
-                    )
-
-                    candidate_target_tokens.append(
-                        torch.tensor(tgt)
-                    )
-
-                    candidate_owner.append(
-                        len(images)
-                    )
-
-            else:
-
-                training_graph = permute_and_reindex_graph(
-                    graph,
-                    vocab=self.vocab,
-                    rng=rng,
-                    shuffle=not self.deterministic,
-                )
-
-                input_array, target_array = build_train_pair(
-                    training_graph,
-                    self.vocab,
-                    rng=rng,
-                )
+            training_graph = permute_and_reindex_graph(
+                graph,
+                vocab=self.vocab,
+                rng=rng,
+                shuffle=not self.deterministic,
+            )
+            input_array, target_array = build_train_pair(
+                training_graph,
+                self.vocab,
+                rng=rng,
+            )
 
             texts.append(str(sample["text"]))
             images.append(image.float())
@@ -172,48 +116,11 @@ class GraphCollator:
                 f"all preprocessed images must have the same CHW shape, got {sorted(shapes)}"
             )
 
-        batch = {
+        return {
             "texts": texts,
             "images": torch.stack(images, dim=0),
+            "input_tokens": torch.stack(input_tokens, dim=0).long(),
+            "target_tokens": torch.stack(target_tokens, dim=0).long(),
             "gt_graphs": gt_graphs,
             "image_ids": image_ids,
         }
-        if self.pmar_enabled:
-
-            batch.update(
-                {
-                    "candidate_input_tokens":
-                        torch.stack(
-                            candidate_input_tokens
-                        ).long(),
-
-                    "candidate_target_tokens":
-                        torch.stack(
-                            candidate_target_tokens
-                        ).long(),
-
-                    "candidate_owner":
-                        torch.tensor(
-                            candidate_owner,
-                            dtype=torch.long,
-                        ),
-                }
-            )
-
-        else:
-
-            batch.update(
-                {
-                    "input_tokens":
-                        torch.stack(
-                            input_tokens
-                        ).long(),
-
-                    "target_tokens":
-                        torch.stack(
-                            target_tokens
-                        ).long(),
-                }
-            )
-
-        return batch
