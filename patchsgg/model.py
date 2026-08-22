@@ -13,7 +13,7 @@ from patchsgg.encoders.base import ConditioningSet
 from patchsgg.graph_seq.vocab import TOKENS_PER_REL, GraphVocab
 from patchsgg.losses import build_loss
 from patchsgg.postprocess import sequences_to_predictions
-
+from patchsgg.graph_seq.linearize import (build_train_pair,)
 
 def build_vocab(cfg) -> GraphVocab:
     vocab_cfg = cfg.get("vocab", {}) if hasattr(cfg, "get") else {}
@@ -124,18 +124,35 @@ class PatchSGGModel(nn.Module):
             modality=modality,
         )
 
+    # def compute_loss(
+    #     self,
+    #     batch: Dict,
+    #     modality: str = "text",
+    # ) -> torch.Tensor:
+    #     conditioning = self.encode(batch, modality=modality, training=True)
+    #     device = conditioning.tokens.device
+    #     input_tokens = batch["input_tokens"].to(device=device, dtype=torch.long)
+    #     target_tokens = batch["target_tokens"].to(device=device, dtype=torch.long)
+
+    #     logits = self.decoder(conditioning, input_tokens)
+    #     return self.loss_fn(logits, target_tokens, input_tokens)
     def compute_loss(
         self,
         batch: Dict,
         modality: str = "text",
     ) -> torch.Tensor:
-        conditioning = self.encode(batch, modality=modality, training=True)
-        device = conditioning.tokens.device
-        input_tokens = batch["input_tokens"].to(device=device, dtype=torch.long)
-        target_tokens = batch["target_tokens"].to(device=device, dtype=torch.long)
+        conditioning = self.encode(batch,modality=modality,training=True,)
 
-        logits = self.decoder(conditioning, input_tokens)
-        return self.loss_fn(logits, target_tokens, input_tokens)
+        if getattr(self.loss_fn,"requires_candidate_sequences",False,):
+            return self._compute_candidate_sequence_loss(batch,conditioning,)
+        # EXACT EXISTING PATH
+        device = conditioning.tokens.device
+        input_tokens = batch["input_tokens"].to(device=device,dtype=torch.long,)
+        target_tokens = batch["target_tokens"].to(device=device,dtype=torch.long,)
+
+        logits = self.decoder(conditioning,input_tokens,)
+
+        return self.loss_fn(logits,target_tokens,input_tokens,)
 
     @torch.no_grad()
     def predict(
@@ -169,3 +186,259 @@ class PatchSGGModel(nn.Module):
             )
 
         return parameters
+    def _repeat_conditioning(
+        self,
+        conditioning: ConditioningSet,
+        index: int,
+        count: int,
+    ) -> ConditioningSet:
+
+        tokens = conditioning.tokens[ index : index + 1].expand( count, -1,-1,)
+        pooled = conditioning.pooled[ index : index + 1].expand( count,-1,)
+        mask = None
+        if conditioning.mask is not None:
+            mask = conditioning.mask[index : index + 1 ].expand(count,-1,)
+
+        return ConditioningSet(
+            tokens=tokens,
+            pooled=pooled,
+            mask=mask,
+        )
+    def _compute_candidate_sequence_loss(
+        self,
+        batch: Dict,
+        conditioning: ConditioningSet,
+    ) -> torch.Tensor:
+        """Compute PMAR while batching candidates across training examples."""
+
+        if "train_graphs" not in batch:
+            raise KeyError(
+                "candidate-sequence losses require "
+                "batch['train_graphs']; use GraphCollator"
+            )
+
+        if (
+            len(batch["train_graphs"])
+            != conditioning.batch_size
+        ):
+            raise ValueError(
+                "train_graphs batch size does not match "
+                "conditioning batch size"
+            )
+
+        device = conditioning.tokens.device
+        batch_size = conditioning.batch_size
+
+        # ---------------------------------------------------------------
+        # Candidate records are pooled across the ENTIRE training batch.
+        #
+        # Each record contains:
+        #
+        #   owner example index
+        #   input sequence
+        #   target sequence
+        #
+        # Candidates with equal sequence length can be stacked together.
+        # ---------------------------------------------------------------
+
+        buckets = {}
+
+        for example_index, graph in enumerate(
+            batch["train_graphs"]
+        ):
+            candidates = (
+                self.loss_fn.build_candidates(
+                    graph
+                )
+            )
+
+            if not candidates.graphs:
+                raise RuntimeError(
+                    "PMAR returned no candidates"
+                )
+
+            for candidate_graph in candidates.graphs:
+
+                input_array, target_array = (
+                    build_train_pair(
+                        list(candidate_graph),
+                        self.vocab,
+                        pad_to_max=False,
+                    )
+                )
+
+                input_tensor = torch.from_numpy(
+                    input_array
+                ).long()
+
+                target_tensor = torch.from_numpy(
+                    target_array
+                ).long()
+
+                sequence_length = int(
+                    input_tensor.shape[0]
+                )
+
+                buckets.setdefault(
+                    sequence_length,
+                    [],
+                ).append(
+                    (
+                        example_index,
+                        input_tensor,
+                        target_tensor,
+                    )
+                )
+
+        # ---------------------------------------------------------------
+        # Store candidate NLLs by the graph/example they belong to.
+        #
+        # Important:
+        # these tensors remain attached to autograd.
+        # ---------------------------------------------------------------
+
+        per_example_nlls = [
+            []
+            for _ in range(
+                batch_size
+            )
+        ]
+
+        candidate_batch_size = int(
+            self.loss_fn.candidate_batch_size
+        )
+
+        # ---------------------------------------------------------------
+        # Candidates from DIFFERENT examples are now allowed to share the
+        # same decoder call.
+        #
+        # We bucket by sequence length because torch.stack requires equal
+        # sequence lengths.
+        # ---------------------------------------------------------------
+
+        for sequence_length, records in buckets.items():
+
+            for start in range(
+                0,
+                len(records),
+                candidate_batch_size,
+            ):
+                stop = min(
+                    start + candidate_batch_size,
+                    len(records),
+                )
+
+                chunk = records[
+                    start:stop
+                ]
+
+                owner_indices = [
+                    record[0]
+                    for record in chunk
+                ]
+
+                input_tokens = torch.stack(
+                    [
+                        record[1]
+                        for record in chunk
+                    ],
+                    dim=0,
+                ).to(
+                    device=device,
+                    dtype=torch.long,
+                )
+
+                target_tokens = torch.stack(
+                    [
+                        record[2]
+                        for record in chunk
+                    ],
+                    dim=0,
+                ).to(
+                    device=device,
+                    dtype=torch.long,
+                )
+
+                candidate_conditioning = (
+                    self._select_conditioning(
+                        conditioning,
+                        owner_indices,
+                    )
+                )
+
+                logits = self.decoder(
+                    candidate_conditioning,
+                    input_tokens,
+                )
+
+                candidate_nll = (
+                    self.loss_fn.candidate_nll(
+                        logits,
+                        target_tokens,
+                    )
+                )
+
+                # Put each NLL back into its corresponding graph.
+                for local_index, owner in enumerate(
+                    owner_indices
+                ):
+                    per_example_nlls[
+                        owner
+                    ].append(
+                        candidate_nll[
+                            local_index
+                        ]
+                    )
+
+        # ---------------------------------------------------------------
+        # PMAR marginalization still happens separately for each graph.
+        #
+        # L_i = -logsumexp_k(-NLL_ik)
+        # ---------------------------------------------------------------
+
+        graph_losses = []
+
+        for example_index, nll_list in enumerate(
+            per_example_nlls
+        ):
+
+            if not nll_list:
+                raise RuntimeError(
+                    f"PMAR example {example_index} "
+                    "has no candidate NLLs"
+                )
+
+            candidate_nll = torch.stack(
+                nll_list,
+                dim=0,
+            )
+
+            graph_loss = (
+                self.loss_fn.marginalize(
+                    candidate_nll
+                )
+            )
+
+            graph_losses.append(
+                graph_loss
+            )
+
+        # ---------------------------------------------------------------
+        # L_batch = mean_i L_i
+        # ---------------------------------------------------------------
+
+        return torch.stack(
+            graph_losses,
+            dim=0,
+        ).mean()
+    def _select_conditioning(
+        self,
+        conditioning: ConditioningSet,
+        example_indices,
+    ) -> ConditioningSet:
+        """Select/repeat conditioning rows for a global PMAR candidate batch."""
+        index = torch.as_tensor(example_indices,device=conditioning.tokens.device,dtype=torch.long,)
+
+        return ConditioningSet(tokens=conditioning.tokens.index_select(0,index,),
+            pooled=conditioning.pooled.index_select(0,index,),
+            mask=(None if conditioning.mask is None else conditioning.mask.index_select(0, index,)), )

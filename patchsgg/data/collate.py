@@ -60,6 +60,7 @@ class GraphCollator:
         input_tokens: list[torch.Tensor] = []
         target_tokens: list[torch.Tensor] = []
         gt_graphs: list[list[tuple]] = []
+        train_graphs: list[list[Relation]] = []
 
         shared_rng = None if self.deterministic else self._worker_rng()
 
@@ -109,7 +110,7 @@ class GraphCollator:
             # Evaluation retains the dataset graph; the matcher handles arbitrary
             # predicted instance numbering.
             gt_graphs.append(graph_to_matcher_tuples(graph, self.vocab))
-
+            train_graphs.append(list( training_graph[ : self.vocab.max_num_rels]))
         shapes = {tuple(image.shape) for image in images}
         if len(shapes) != 1:
             raise ValueError(
@@ -122,5 +123,6 @@ class GraphCollator:
             "input_tokens": torch.stack(input_tokens, dim=0).long(),
             "target_tokens": torch.stack(target_tokens, dim=0).long(),
             "gt_graphs": gt_graphs,
+            "train_graphs": train_graphs,
             "image_ids": image_ids,
         }

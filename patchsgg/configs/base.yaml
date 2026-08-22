@@ -57,6 +57,10 @@ loss:
   weighted: true                   # (matching_ce) also apply frequency weights
   matcher_n: 3
   matcher_depth: 10
+  # PMAR only:
+  pmar_exact_threshold: 64
+  pmar_num_samples: 8
+  pmar_candidate_batch_size: 8
 
 data:
   dataset: vg                      # vg | toy

@@ -77,6 +77,16 @@ def build_loss(cfg, vocab: GraphVocab) -> Loss:
                               matcher_depth=int(cfg.loss.get("matcher_depth", 10)))
     if kind == "order_agnostic":
         from patchsgg.losses.order_agnostic import OrderAgnosticCELoss
-
+        
         return OrderAgnosticCELoss(vocab, label_smoothing=ls)
+    if kind == "pmar":
+        from patchsgg.losses.pmar import PMARLoss
+
+        return PMARLoss(vocab,
+            exact_threshold=int(cfg.loss.get("pmar_exact_threshold",64,)),
+            num_samples=int(cfg.loss.get("pmar_num_samples",8,)),
+            candidate_batch_size=int(cfg.loss.get("pmar_candidate_batch_size",8,)),
+            seed=int(cfg.get("seed",42,)),
+            )
+        
     raise ValueError(f"unknown loss.type {kind!r}")
